@@ -47,3 +47,10 @@
     margin-right: 0.5rem;
 }
 
+.navbar__menu {
+    display: flex;
+    align-items: center;
+    list-style: none;
+    text-align: center;
+}
+
