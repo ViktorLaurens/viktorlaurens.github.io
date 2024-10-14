@@ -91,4 +91,12 @@
     color: #fff;
 }
 
+.button:hover {
+    background: #4837ff;
+    transition: all 0.3s ease;
+}
 
+.navbar__links:hover {
+    color: #f77062;
+    transition: all 0.3s ease;
+}
