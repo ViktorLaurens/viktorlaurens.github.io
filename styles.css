@@ -203,14 +203,12 @@
 
 .main__container {
     display: grid;
-    grid-template-columns: lfr lfr;
+    grid-template-columns: 1fr 1fr; /* Equal space for text and image */
     align-items: center;
-    justify-self: center;
     margin: 0 auto;
     height: 90vh;
     background-color: #141414;
     z-index: 1;
-    width: 100%;
     max-width: 1300px;
     padding: 0 50px;
 }
@@ -286,13 +284,24 @@
 }
 
 .main__img--container {
+    text-align: right; /* Align image to the right */
+    display: flex;
+    justify-content: flex-end;
+}
+
+#main__img {
+    width: 60%; /* Adjust the size of the image */
+    max-width: 600px;
+}
+
+/* .main__img--container {
     text-align: center;
 }
 
 #main__img {
     height: 80%;
     width: 80%;
-}
+} */
 
 @media screen and (max-width: 768px) {
     .main__container {
