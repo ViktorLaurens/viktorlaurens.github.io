@@ -284,24 +284,13 @@
 }
 
 .main__img--container {
-    text-align: right; /* Align image to the right */
-    display: flex;
-    justify-content: flex-end;
-}
-
-#main__img {
-    width: 60%; /* Adjust the size of the image */
-    max-width: 600px;
-}
-
-/* .main__img--container {
     text-align: center;
 }
 
 #main__img {
-    height: 80%;
-    width: 80%;
-} */
+    width: 80%; /* Adjust the size of the image */
+    max-width: 600px;
+}
 
 @media screen and (max-width: 768px) {
     .main__container {
