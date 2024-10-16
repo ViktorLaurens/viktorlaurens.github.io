@@ -288,3 +288,8 @@
 .main__img--container {
     text-align: center;
 }
+
+#main__img {
+    height: 80%;
+    width: 80%;
+}
