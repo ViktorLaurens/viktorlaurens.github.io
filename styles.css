@@ -41,6 +41,9 @@
     height: 100%; /* Set height to 100% of the navbar */
     width: auto; /* Maintain aspect ratio */
     border: none; /* No border */
+    padding: 0; /* Ensure no padding */
+    margin: 0; /* Ensure no margin */
+    display: block; /* Prevent any extra space below the image */
 }
 
 .fa-gem {
