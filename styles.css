@@ -39,40 +39,15 @@
     margin: 0; /* Ensure no margin */
 }
 
-#navbar__logo img {
-    max-height: 100%; /* Allow the image to scale down to fit */
-    width: auto; /* Maintain aspect ratio */
-    display: block; /* Prevent any space below the image */
-    border: none; /* Ensure no border */
+#logo__img {
+    max-height: 100%;
+    width: auto; 
+    display: block; 
+    border: none; 
     outline: none; 
-    box-shadow: none; /* Ensure no shadow */
-    padding: 0; /* Reset padding */
-    margin: 0; /* Reset margin */
-}
-
-
-#navbar__logo, #navbar__logo img {
-    border: none !important; /* Force removal of border */
-}
-
-/* #navbar__logo {
-    height: 100%;
-    width: auto;
-    display: flex;
-    align-items: center; 
-    cursor: pointer;
-} */
-
-/* #navbar__logo img {
-    height: 100%; 
-    width: auto;
-    border: none !important;
-    outline: none; 
-    box-shadow: none;
-} */
-
-.fa-gem {
-    margin-right: 0.5rem;
+    box-shadow: none; 
+    padding: 0; 
+    margin: 0;
 }
 
 .navbar__menu {
