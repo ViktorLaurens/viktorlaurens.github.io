@@ -500,15 +500,6 @@ cursor: pointer;
     justify-content: center;
     align-items: center;
 }
-  
-/* #footer__logo {
-    color: #fff;
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    text-decoration: none;
-    font-size: 2rem;
-} */
 
 #footer__logo {
     height: 80px; /* Match the height of the navbar */
