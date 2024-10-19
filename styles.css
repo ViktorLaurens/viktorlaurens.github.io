@@ -5,6 +5,37 @@
     font-family: 'Kumbh Sans', sans-serif;
 }
 
+:root {
+    --black: #000000;
+    --white: #ffffff;
+    --off-red: #F40000;
+    --crimson-red: #DC2626;
+    --raspberry-red: #CE2D4F;
+    --poppy-red: #DB3A34;
+
+    --Alice-blue: #EBF2FA;
+    --marian-blue: #1E3A8A;
+    --lapiz-lazuli: #05668D;
+    --aquamarine-blue: #70F8BA;
+
+    --mint-green: #10B981;
+    --lime-green: #CAFE48; 
+    --olive-green: #8CBA80;
+    --midnight-green: #084C61;
+
+    --pumpkin-orange: #F97316;  
+    --amber-yellow: #FFC43D; 
+    --sunglow-yellow: #FFC857;
+    --lion-brown: #C59B76;
+
+    --charcoal-grey: #374151;  
+
+    --lavender-pink: #E4B7E5; 
+    --african-violet: #B288C0;
+    --ultra-violet: #57467B;
+    --pompadour-pink: #E3879E; 
+}
+
 .navbar {
     background-color: #000000;
     color: #000000;
