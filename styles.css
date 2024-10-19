@@ -2,7 +2,7 @@
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    font-family: 'Kumbh Sans', sans-serif;
+    font-family: 'DM Sans', sans-serif;
 }
 
 :root {
@@ -57,6 +57,7 @@
     /* Neutrals */
     --black: #000000;
     --white: #ffffff;
+    --web-white: #D8E3FC; 
     --charcoal-grey: #374151; 
     --night-black: #131313; 
 }
@@ -260,7 +261,7 @@
 
 /* Hero section */
 .main {
-    background-color: var(--night-black);
+    background-color: var(--white);
 }
 
 .main__container {
@@ -269,7 +270,7 @@
     align-items: center;
     margin: 0 auto;
     height: 90vh;
-    background-color: var(--night-black);
+    background-color: var(--white);
     z-index: 1;
     max-width: 1300px;
     padding: 0 50px;
@@ -301,7 +302,7 @@
     margin-top: 1rem;
     font-size: 2rem;
     font-weight: 700;
-    color: var(--white);
+    color: var(--black);
 }
 
 .main__btn {
