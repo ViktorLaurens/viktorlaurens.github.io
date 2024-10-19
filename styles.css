@@ -279,8 +279,7 @@
 .main__content h1 {
     font-size: 4rem;
     font-weight: 700;
-    background-color: #ff8177;
-    background-image: linear-gradient(to top, #ff0844 0%, #ffb199 100%);
+    background-image: linear-gradient(to top, var(--off-red) 20%, var(--sunglow-yellow) 100%);
     background-size: 100%;
     -webkit-background-clip: text;
     -moz-background-clip: text;
@@ -291,8 +290,8 @@
 .main__content h2 {
     font-size: 4rem;
     font-weight: 700;
-    background-color: #ff8177;
-    background-image: linear-gradient(to top, #b721ff 0%, #21d4fd 100%);
+    /* background-image: linear-gradient(to top, #b721ff 0%, #21d4fd 100%); */
+    background-image: linear-gradient(to top, var(--ultra-violet) 0%, var(--off-red) 100%);
     background-size: 100%;
     -webkit-background-clip: text;
     -moz-background-clip: text;
@@ -309,11 +308,11 @@
 
 .main__btn {
     font-size: 1rem;
-    background-image: linear-gradient(to top, #f77062 0%, #fe5196 100%);
+    background-image: linear-gradient(to top, var(--marian-blue) 0%, var(--seagreen-blue) 100%);
     padding: 14px 32px;
     border: none;
     border-radius: 4px;
-    color: #fff;
+    color: var(--white);
     margin-top: 2rem;
     cursor: pointer; 
     position: relative;
@@ -324,7 +323,7 @@
 .main__btn a {
     position: relative;
     z-index: 2;
-    color: #fff;
+    color: var(--white);
     text-decoration: none;
 }
 
@@ -335,7 +334,8 @@
     left: 0;
     width: 0;
     height: 100%;
-    background: #4837ff;
+    /* background: #4837ff; */
+    background: var(--coral-orange);
     transition: all 0.35s;
     border-radius: 4px;
 }
