@@ -6,40 +6,55 @@
 }
 
 :root {
-    --black: #000000;
-    --white: #ffffff;
+    /* Red */
+    --poppy-red: #DB3A34;
     --off-red: #F40000;
     --crimson-red: #DC2626;
     --raspberry-red: #CE2D4F;
-    --poppy-red: #DB3A34;
+    --redwood-red: #A63D40; 
 
-    --Alice-blue: #EBF2FA;
-    --marian-blue: #1E3A8A;
-    --lapiz-lazuli: #05668D;
-    --aquamarine-blue: #70F8BA;
-    --seagreen-blue: #2EC4B6; 
+    /* Orange */
+    --syracuse-red-orange: #D34E24;
+    --pumpkin-orange: #F97316; 
 
-    --mint-green: #10B981;
+    /* Yellow */
+    --amber-yellow: #FFC43D; 
+    --sunglow-yellow: #FFC857;
+
+    /* Brown */
+    --lion-brown: #C59B76;
+    --peach-brown: #F1BF98; 
+
+    /* Green */
     --lime-green: #CAFE48; 
+    --mint-green: #10B981;
     --olive-green: #8CBA80;
     --midnight-green: #084C61;
 
-    --pumpkin-orange: #F97316;  
-    --amber-yellow: #FFC43D; 
-    --sunglow-yellow: #FFC857;
-    --lion-brown: #C59B76;
+    /* Blue */
+    --aquamarine-blue: #70F8BA;
+    --seagreen-blue: #2EC4B6;  
+    --lapiz-lazuli: #05668D;
+    --marian-blue: #1E3A8A;
+    --Alice-blue: #EBF2FA;
 
-    --charcoal-grey: #374151;  
-
+    /* Violet/Pink */
     --lavender-pink: #E4B7E5; 
-    --african-violet: #B288C0;
-    --ultra-violet: #57467B;
     --pompadour-pink: #E3879E; 
+    --african-violet: #B288C0;
+    --lilac-violet: #B6A6CA; 
+    --ultra-violet: #57467B;
+    --tropical-indigo: #9381FF;
+
+    /* Neutrals */
+    --black: #000000;
+    --white: #ffffff;
+    --charcoal-grey: #374151; 
 }
 
 .navbar {
-    background-color: #000000;
-    color: #000000;
+    background-color: var(--black);
+    color: var(--black);
     height: 80px;
     display: flex;
     justify-content: center;
@@ -86,21 +101,6 @@
     border-style: none; /* Explicitly set no border style */
 }
 
-/* #logo__img {
-    max-height: 100%;
-    width: auto; 
-    display: block; 
-    border: none; 
-    outline: none; 
-    box-shadow: none; 
-    padding: 0; 
-    margin: 0;
-}
-
-#logo__img rect {
-    shape-rendering: crispEdges;
-} */
-
 .navbar__menu {
     display: flex;
     align-items: center;
@@ -112,7 +112,7 @@
     height: 80px;
 }
  .navbar__links {
-    color: #fff; 
+    color: var(--white); 
     display: flex;
     align-items: center;
     justify-content: center;
@@ -140,8 +140,8 @@
     border: none; 
     outline: none;
     border-radius: 4px;
-    background: #f77062;
-    color: #fff;
+    background: var(--black);
+    color: var(--white);
 }
 
 .button:hover {
