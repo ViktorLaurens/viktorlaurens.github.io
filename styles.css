@@ -278,6 +278,7 @@
 
 .main__content h1 {
     font-size: 4rem;
+    font-weight: 700;
     background-color: #ff8177;
     background-image: linear-gradient(to top, #ff0844 0%, #ffb199 100%);
     background-size: 100%;
@@ -289,6 +290,7 @@
 
 .main__content h2 {
     font-size: 4rem;
+    font-weight: 700;
     background-color: #ff8177;
     background-image: linear-gradient(to top, #b721ff 0%, #21d4fd 100%);
     background-size: 100%;

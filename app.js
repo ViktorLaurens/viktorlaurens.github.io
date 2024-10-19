@@ -5,3 +5,35 @@ menu.addEventListener('click', function() {
     menu.classList.toggle('is-active')
     menuLinks.classList.toggle('active')
 })
+
+// Typing functionality
+document.addEventListener("DOMContentLoaded", function() {
+    const typedText = document.getElementById("typed-text");
+    const message = "Welcome to my personal webpage!";
+    let i = 0;
+    
+    function typeWriter() {
+        if (i < message.length) {
+            typedText.innerHTML += message.charAt(i);
+            i++;
+            setTimeout(typeWriter, 100); // Adjust typing speed if needed
+        }
+    }
+
+    // Create an observer to detect when the section is in view
+    const observer = new IntersectionObserver(function(entries) {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                typeWriter(); // Start typing when in view
+                observer.unobserve(entry.target); // Stop observing once it has started typing
+            }
+        });
+    }, {
+        threshold: 0.5 // Trigger when 50% of the section is visible
+    });
+
+    // Observe the section that contains the typing effect
+    const target = document.querySelector(".main__content");
+    observer.observe(target);
+});
+
