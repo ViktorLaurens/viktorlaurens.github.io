@@ -14,18 +14,25 @@
     --redwood-red: #A63D40; 
 
     /* Orange */
+    --engineering-orange: #BF0603; 
     --syracuse-red-orange: #D34E24;
+    --vermillion: #F0544F; 
     --pumpkin-orange: #F97316; 
+    --coral-orange: #FF8552; 
 
     /* Yellow */
     --amber-yellow: #FFC43D; 
     --sunglow-yellow: #FFC857;
 
     /* Brown */
+    --burgundy-brown: #70161E; 
+    --dark-goldenrod: #B68F40; 
     --lion-brown: #C59B76;
     --peach-brown: #F1BF98; 
+    --ecru: #D4B483; 
 
     /* Green */
+    --green: #1EFC1E; 
     --lime-green: #CAFE48; 
     --mint-green: #10B981;
     --olive-green: #8CBA80;
@@ -35,6 +42,7 @@
     --aquamarine-blue: #70F8BA;
     --seagreen-blue: #2EC4B6;  
     --lapiz-lazuli: #05668D;
+    --neon-blue: #566DFF; 
     --marian-blue: #1E3A8A;
     --Alice-blue: #EBF2FA;
 
@@ -50,6 +58,7 @@
     --black: #000000;
     --white: #ffffff;
     --charcoal-grey: #374151; 
+    --night-black: #131313; 
 }
 
 .navbar {
@@ -140,17 +149,17 @@
     border: none; 
     outline: none;
     border-radius: 4px;
-    background: var(--black);
+    background: var(--marian-blue);
     color: var(--white);
 }
 
 .button:hover {
-    background: #4837ff;
+    background: var(--seagreen-blue);
     transition: all 0.3s ease;
 }
 
 .navbar__links:hover {
-    color: #f77062;
+    color: var(--seagreen-blue);
     transition: all 0.3s ease;
 }
 
@@ -179,7 +188,7 @@
     }
 
     .navbar__menu.active {
-        background: #131313;
+        background: var(--night-black);
         top: 100%;
         opacity: 1;
         transition: all 0.5s ease;
@@ -197,7 +206,7 @@
         height: 3px;
         margin: 5px auto;
         transition: all 0.3s ease-in-out; 
-        background: #fff;
+        background: var(--white);
     }
 
     .navbar__item {
@@ -251,7 +260,7 @@
 
 /* Hero section */
 .main {
-    background-color: #141414;
+    background-color: var(--night-black);
 }
 
 .main__container {
@@ -260,7 +269,7 @@
     align-items: center;
     margin: 0 auto;
     height: 90vh;
-    background-color: #141414;
+    background-color: var(--night-black);
     z-index: 1;
     max-width: 1300px;
     padding: 0 50px;
@@ -292,7 +301,7 @@
     margin-top: 1rem;
     font-size: 2rem;
     font-weight: 700;
-    color: #fff;
+    color: var(--white);
 }
 
 .main__btn {
