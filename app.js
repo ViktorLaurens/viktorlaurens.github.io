@@ -24,7 +24,8 @@ document.addEventListener("DOMContentLoaded", function() {
     const observer = new IntersectionObserver(function(entries) {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
-                typeWriter(); // Start typing when in view
+                // Delay the typewriter start by 3.7 seconds (3.5s animation + 200ms buffer)
+                setTimeout(typeWriter, 2800);
                 observer.unobserve(entry.target); // Stop observing once it has started typing
             }
         });

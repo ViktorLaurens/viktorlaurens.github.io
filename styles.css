@@ -283,7 +283,7 @@
 /* Consistent animation for h1, h2, h3 */
 @keyframes fallDown {
     0% {
-        transform: translateY(-100px);
+        transform: translateY(-75px);
         opacity: 0;
     }
     100% {
@@ -307,7 +307,7 @@
     /* Animation */
     opacity: 0;
     transform: translateY(-100px);
-    animation: fallDown 0.6s ease-out forwards;
+    animation: fallDown 2s ease-out forwards;
     animation-delay: 0.5s;
 }
 
@@ -326,7 +326,7 @@
     /* Animation */
     opacity: 0;
     transform: translateY(-100px);
-    animation: fallDown 0.6s ease-out forwards;
+    animation: fallDown 2s ease-out forwards;
     animation-delay: 1s;
 }
 
@@ -345,7 +345,7 @@
     /* Animation */
     opacity: 0;
     transform: translateY(-100px);
-    animation: fallDown 0.6s ease-out forwards;
+    animation: fallDown 2s ease-out forwards;
     animation-delay: 1.5s;
 }
 
