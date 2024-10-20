@@ -9,7 +9,7 @@ menu.addEventListener('click', function() {
 // Typing functionality
 document.addEventListener("DOMContentLoaded", function() {
     const typedText = document.getElementById("typed-name");
-    const message = "Viktor Laurens De Groote";
+    const message = "Viktor Laurens De Groote.";
     let i = 0;
     
     function typeWriter() {

@@ -355,6 +355,9 @@
     font-size: 2.5rem;
     font-weight: 700;
     color: var(--black);
+    height: 3rem; 
+    overflow: hidden; 
+    white-space: nowrap; 
 }
 
 .main__btn {
@@ -393,7 +396,7 @@
 }
 
 .main__btn:hover {
-    color: #fff;
+    color: var(--white);
 }
 
 .main__btn:hover:after {
@@ -463,14 +466,14 @@
 
 /* Services section */
 .services {
-    background: #141414;
+    background: var(--white);
     display: flex;
     flex-direction: column;
     align-items: center;
     min-height: 100vh;
 }
 
-.services h1 {
+/* .services h1 {
     background-color: #ff8177;
     background-image: linear-gradient(
         to right, 
@@ -488,7 +491,7 @@
     -moz-background-clip: text;
     -webkit-text-fill-color: transparent;
     -moz-text-fill-color: transparent;
-}
+} */
 
 .services__container {
     display: flex;
@@ -510,7 +513,7 @@
     background-size: cover;
     background-position: left; /* Center of the image is shown */
     position: relative;
-    color: #fff;
+    color: var(--white);
 }
   
 .services__card:before {
