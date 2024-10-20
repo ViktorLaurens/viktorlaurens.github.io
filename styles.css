@@ -567,11 +567,17 @@ left: 30px;
     background: var(--off-red);
     transition: all 0.35s;
     border-radius: 4px;
+    cursor: pointer;
 }
 
-.services__card button:hover {
-    background: var(--off-red);
-    cursor: pointer;
+.services__card button a {
+    color: var(--white); /* Make the text white */
+    text-decoration: none; /* Remove the underline */
+}
+
+.services__card button a:hover {
+    color: var(--white); /* Ensure text stays white on hover */
+    text-decoration: none; /* Ensure no underline on hover */
 }
 
 .services__card:hover {
