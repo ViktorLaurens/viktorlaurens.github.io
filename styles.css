@@ -514,6 +514,8 @@
     background-position: left; /* Center of the image is shown */
     position: relative;
     color: var(--white);
+    overflow: hidden;
+    transition: transform 0.2s ease-in;
 }
   
 .services__card:before {
@@ -532,37 +534,47 @@ background-image: linear-gradient(
 
 .services__card h2 {
 position: absolute;
-top: 350px;
+top: 25px;
 left: 30px;
 }
 
 .services__card p {
 position: absolute;
-top: 400px;
+top: 75px;
 left: 30px;
 }
 
 .services__card button {
-color: #fff;
-padding: 10px 20px;
-border: none;
-outline: none;
-border-radius: 4px;
-background: #f77062;
-position: absolute;
-top: 440px;
-left: 30px;
-font-size: 1rem;
+    color: var(--white);
+    padding: 10px 20px;
+    border: none;
+    outline: none;
+    border-radius: 4px;
+    background: var(--marian-blue);
+    position: absolute;
+    bottom: 30px; 
+    left: 30px;
+    font-size: 1rem;
+    transition: all 0.35s; 
 }
 
 .services__card button:hover {
-cursor: pointer;
+    position: absolute;
+    content: '';
+    background: var(--seagreen-blue);
+    transition: all 0.35s;
+    border-radius: 4px;
+}
+
+.services__card button:hover {
+    background: var(--seagreen-blue);
+    cursor: pointer;
 }
 
 .services__card:hover {
-transform: scale(1.075);
-transition: 0.2s ease-in;
-cursor: pointer;
+    transform: scale(1.075);
+    transition: 0.2s ease-in;
+    cursor: pointer;
 }
 
 @media screen and (max-width: 960px) {
