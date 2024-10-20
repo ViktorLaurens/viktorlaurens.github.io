@@ -8,8 +8,8 @@ menu.addEventListener('click', function() {
 
 // Typing functionality
 document.addEventListener("DOMContentLoaded", function() {
-    const typedText = document.getElementById("typed-text");
-    const message = "Welcome to my personal webpage!";
+    const typedText = document.getElementById("typed-name");
+    const message = "Viktor Laurens De Groote";
     let i = 0;
     
     function typeWriter() {
@@ -36,4 +36,5 @@ document.addEventListener("DOMContentLoaded", function() {
     const target = document.querySelector(".main__content");
     observer.observe(target);
 });
+
 

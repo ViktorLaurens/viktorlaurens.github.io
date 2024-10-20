@@ -41,9 +41,13 @@
     /* Blue */
     --aquamarine-blue: #70F8BA;
     --seagreen-blue: #2EC4B6;  
+    --vivid-sky-blue: #00D4FF; 
     --lapiz-lazuli: #05668D;
     --neon-blue: #566DFF; 
+    --french-blue: #0473bf; 
     --marian-blue: #1E3A8A;
+    --navy-blue: #090979; 
+    --oxford-blue: #020024;
     --Alice-blue: #EBF2FA;
 
     /* Violet/Pink */
@@ -259,7 +263,7 @@
     }
 }
 
-/* Hero section */
+/* First section */
 .main {
     background-color: var(--white);
 }
@@ -276,32 +280,79 @@
     padding: 0 50px;
 }
 
+/* Consistent animation for h1, h2, h3 */
+@keyframes fallDown {
+    0% {
+        transform: translateY(-100px);
+        opacity: 0;
+    }
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Style and animations for h1 */
 .main__content h1 {
+    font-family: 'DM Sans', sans-serif;
     font-size: 4rem;
     font-weight: 700;
-    background-image: linear-gradient(to top, var(--off-red) 20%, var(--sunglow-yellow) 100%);
+    background: linear-gradient(180deg, var(--oxford-blue) 0%, var(--navy-blue) 100%);
     background-size: 100%;
     -webkit-background-clip: text;
     -moz-background-clip: text;
     -webkit-text-fill-color: transparent;
     -moz-text-fill-color: transparent;
+
+    /* Animation */
+    opacity: 0;
+    transform: translateY(-100px);
+    animation: fallDown 0.6s ease-out forwards;
+    animation-delay: 0.5s;
 }
 
+/* Style and animations for h2 */
 .main__content h2 {
-    font-size: 4rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 4rem; /* Slightly smaller than h1 for hierarchy */
     font-weight: 700;
-    /* background-image: linear-gradient(to top, #b721ff 0%, #21d4fd 100%); */
-    background-image: linear-gradient(to top, var(--ultra-violet) 0%, var(--off-red) 100%);
+    background: linear-gradient(180deg, var(--navy-blue) 0%, var(--french-blue) 100%);
     background-size: 100%;
     -webkit-background-clip: text;
     -moz-background-clip: text;
     -webkit-text-fill-color: transparent;
     -moz-text-fill-color: transparent;
+
+    /* Animation */
+    opacity: 0;
+    transform: translateY(-100px);
+    animation: fallDown 0.6s ease-out forwards;
+    animation-delay: 1s;
 }
 
+/* Style and animations for h3 */
+.main__content h3 {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 4rem; /* Slightly smaller than h2 for hierarchy */
+    font-weight: 700;
+    background: linear-gradient(180deg, var(--french-blue) 0%, var(--vivid-sky-blue) 100%);
+    background-size: 100%;
+    -webkit-background-clip: text;
+    -moz-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -moz-text-fill-color: transparent;
+
+    /* Animation */
+    opacity: 0;
+    transform: translateY(-100px);
+    animation: fallDown 0.6s ease-out forwards;
+    animation-delay: 1.5s;
+}
+
+/* Style for typed name (p element) */
 .main__content p {
     margin-top: 1rem;
-    font-size: 2rem;
+    font-size: 2.5rem;
     font-weight: 700;
     color: var(--black);
 }
