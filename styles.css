@@ -359,7 +359,8 @@
 
 .main__btn {
     font-size: 1rem;
-    background-image: linear-gradient(to top, var(--marian-blue) 0%, var(--seagreen-blue) 100%);
+    /* background-image: linear-gradient(90deg, var(--oxford-blue) 0%, var(--navy-blue) 33%, var(--french-blue) 66%, var(--vivid-sky-blue) 100%); */
+    background-color: var(--marian-blue);
     padding: 14px 32px;
     border: none;
     border-radius: 4px;
@@ -386,7 +387,7 @@
     width: 0;
     height: 100%;
     /* background: #4837ff; */
-    background: var(--coral-orange);
+    background: var(--seagreen-blue);
     transition: all 0.35s;
     border-radius: 4px;
 }
