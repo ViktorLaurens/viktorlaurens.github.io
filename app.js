@@ -34,7 +34,7 @@ document.addEventListener("DOMContentLoaded", function() {
     });
 
     // Observe the section that contains the typing effect
-    const target = document.querySelector(".main__content");
+    const target = document.querySelector(".first__content");
     observer.observe(target);
 });
 

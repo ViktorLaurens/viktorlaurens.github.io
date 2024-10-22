@@ -133,15 +133,15 @@
     text-decoration: none;
     padding: 0 1rem;
     height: 100%;
- }
+}
 
- .navbar__btn {
+.navbar__btn {
     display: flex;
     justify-content: center;
     align-items: center;
     padding: 0 1rem;
     width: 100%;
- }
+}
 
 .button {
     display: flex;
@@ -264,11 +264,11 @@
 }
 
 /* First section */
-.main {
+.first {
     background-color: var(--white);
 }
 
-.main__container {
+.first__container {
     display: grid;
     grid-template-columns: 1fr 1fr; /* Equal space for text and image */
     align-items: center;
@@ -293,7 +293,7 @@
 }
 
 /* Style and animations for h1 */
-.main__content h1 {
+.first__content h1 {
     font-family: 'DM Sans', sans-serif;
     font-size: 4rem;
     font-weight: 700;
@@ -313,7 +313,7 @@
 }
 
 /* Style and animations for h2 */
-.main__content h2 {
+.first__content h2 {
     font-family: 'DM Sans', sans-serif;
     font-size: 4rem; /* Slightly smaller than h1 for hierarchy */
     font-weight: 700;
@@ -333,7 +333,7 @@
 }
 
 /* Style and animations for h3 */
-.main__content h3 {
+.first__content h3 {
     font-family: 'DM Sans', sans-serif;
     font-size: 4rem; /* Slightly smaller than h2 for hierarchy */
     font-weight: 700;
@@ -353,7 +353,7 @@
 }
 
 /* Style for typed name (p element) */
-.main__content p {
+.first__content p {
     margin-top: 1rem;
     font-size: 2.5rem;
     font-weight: 700;
@@ -363,7 +363,7 @@
     white-space: nowrap; 
 }
 
-.main__btn {
+.first__btn {
     font-size: 1rem;
     /* background-image: linear-gradient(90deg, var(--oxford-blue) 0%, var(--navy-blue) 33%, var(--french-blue) 66%, var(--vivid-sky-blue) 100%); */
     background-color: var(--marian-blue);
@@ -378,14 +378,14 @@
     outline: none; 
 }
 
-.main__btn a {
+.first__btn a {
     position: relative;
     z-index: 2;
     color: var(--white);
     text-decoration: none;
 }
 
-.main__btn:after {
+.first__btn:after {
     position: absolute;
     content: '';
     top: 0;
@@ -398,25 +398,25 @@
     border-radius: 4px;
 }
 
-.main__btn:hover {
+.first__btn:hover {
     color: var(--white);
 }
 
-.main__btn:hover:after {
+.first__btn:hover:after {
     width: 100%;
 }
 
-.main__img--container {
+.first__img--container {
     text-align: center;
 }
 
-#main__img {
+#first__img {
     width: 80%; /* Adjust the size of the image */
     max-width: 600px;
 }
 
 @media screen and (max-width: 768px) {
-    .main__container {
+    .first__container {
         display: grid;
         grid-template-columns: auto;
         align-items: center;
@@ -426,49 +426,49 @@
         height: 90vh;
     }
 
-    .main__content {
+    .first__content {
         text-align: center;
         margin-bottom: 4rem;
     }
 
-    .main__content h1 {
+    .first__content h1 {
         font-size: 2.5rem;
         margin-top: 2rem;
     }
 
-    .main__content h2 {
+    .first__content h2 {
         font-size: 3rem;
     }
 
-    .main__content p {
+    .first__content p {
         font-size: 1.5rem;
         margin-top: 1rem;
     }
 }
 
 @media screen and (max-width: 480px) {
-    .main__content h1 {
+    .first__content h1 {
         font-size: 2rem;
         margin-top: 3rem;
     }
 
-    .main__content h2 {
+    .first__content h2 {
         font-size: 2rem;
     }
 
-    .main__content p {
+    .first__content p {
         font-size: 2rem;
         margin-top: 1.5rem;
     }
 
-    .main__btn {
+    .first__btn {
         padding: 12px 36px;
         margin: 2.5rem 0;
     }
 }
 
-/* Services section */
-.services {
+/* Second section */
+.second {
     background: var(--white);
     display: flex;
     flex-direction: column;
@@ -496,13 +496,13 @@
     -moz-text-fill-color: transparent;
 } */
 
-.services__container {
+.second__container {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
 }
 
-.services__card {
+.second__card {
     margin: 1rem;
     height: 525px;
     width: 400px;
@@ -521,11 +521,11 @@
     transition: transform 0.2s ease-in;
 }
   
-.services__card:before {
+.second__card:before {
 opacity: 0.2;
 }
 
-.services__card:nth-child(2) {
+.second__card:nth-child(2) {
 background-image: linear-gradient(
     to bottom,
     rgba(0, 0, 0, 0) 0%,
@@ -535,19 +535,19 @@ background-image: linear-gradient(
     background-position: center; /* Top part of the image is shown */
 }
 
-.services__card h2 {
+.second__card h2 {
 position: absolute;
 top: 25px;
 left: 30px;
 }
 
-.services__card p {
+.second__card p {
 position: absolute;
 top: 75px;
 left: 30px;
 }
 
-.services__card button {
+.second__card button {
     color: var(--white);
     padding: 10px 20px;
     border: none;
@@ -561,7 +561,7 @@ left: 30px;
     transition: all 0.35s; 
 }
 
-.services__card button:hover {
+.second__card button:hover {
     position: absolute;
     content: '';
     background: var(--off-red);
@@ -570,42 +570,42 @@ left: 30px;
     cursor: pointer;
 }
 
-.services__card button a {
+.second__card button a {
     color: var(--white); /* Make the text white */
     text-decoration: none; /* Remove the underline */
 }
 
-.services__card button a:hover {
+.second__card button a:hover {
     color: var(--white); /* Ensure text stays white on hover */
     text-decoration: none; /* Ensure no underline on hover */
 }
 
-.services__card:hover {
+.second__card:hover {
     transform: scale(1.075);
     transition: 0.2s ease-in;
 }
 
 @media screen and (max-width: 960px) {
-.services {
+.second {
     height: 1600px;
 }
 
-.services h1 {
+.second h1 {
     font-size: 2rem;
     margin-top: 12rem;
 }
 }
 
 @media screen and (max-width: 480px) {
-.services {
+.second {
     height: 1400px;
 }
 
-.services h1 {
+.second h1 {
     font-size: 1.2rem;
 }
 
-.services__card {
+.second__card {
     width: 300px;
 }
 }
