@@ -48,5 +48,46 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     });
 });
 
+// Horizontal bar animation
+// Select the horizontal bar element
+const horizontalBar = document.querySelector('.horizontal-bar');
+
+// Function to update the width of the bar based on scroll position
+function updateBarWidth() {
+  // Get the total scrollable height of the page
+  const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
+  
+  // Calculate how far the user has scrolled as a percentage
+  const scrollPosition = window.scrollY / scrollableHeight;
+  
+  // Set the width of the horizontal bar based on scroll percentage
+  horizontalBar.style.width = `${scrollPosition * 100}%`;
+}
+
+// Event listener to update the bar as the user scrolls
+window.addEventListener('scroll', updateBarWidth);
+
+// Divider bar animation
+window.addEventListener('scroll', function() {
+    const scrollTop = window.scrollY;
+    const scrollFactor = Math.min(scrollTop / (window.innerHeight * 0.8), 1); // Limit effect to the viewport height
+  
+    const maxWidth = window.innerWidth - 100; // Screen width minus 50px margins on both sides
+    const currentWidth = Math.max(10, scrollFactor * maxWidth); // Expanding the line width with scrolling
+  
+    const line = document.querySelector('.divider-bar');
+    line.style.width = `${currentWidth}px`;
+  
+    // Maintain the rounded ends of the line while it expands
+    line.style.borderRadius = '50px'; // Half circles on both ends
+    line.style.background = 'linear-gradient(90deg, var(--oxford-blue) 0%, var(--navy-blue) 33%, var(--french-blue) 66%, var(--vivid-sky-blue) 100%)';
+});
+
+
+  
+
+
+
+
 
 

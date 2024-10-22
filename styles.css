@@ -263,6 +263,18 @@
     }
 }
 
+/* Horizontal bar */
+.horizontal-bar {
+    width: 0;
+    height: 4px; /* Thickness of the bar */
+    background-color: var(--syracuse-red-orange); /* Bar color */
+    position: fixed;
+    bottom: 0; /* Position at the bottom */
+    left: 0;
+    transition: width 0.3s ease-out; /* Smooth width change */
+    z-index: 999; /* Make sure it appears above other content */
+}
+
 /* First section */
 .first {
     background-color: var(--white);
@@ -467,6 +479,17 @@
     }
 }
 
+/* Divider bar */
+.divider-bar {
+    width: 10px; /* Starts as a small dot */
+    height: 5px; /* Fixed finer height */
+    background: var(--oxford-blue); /* Initial color */
+    margin: 0 50px;
+    margin-bottom: 36px;
+    transition: all 0.3s ease-out;
+    border-radius: 50%; /* Initial round shape */
+}
+
 /* Second section */
 .second {
     background: var(--white);
@@ -614,7 +637,7 @@ left: 30px;
 .footer__container {
     background-color: #000000;
     padding: 4rem 0;
-    margin-top: 4rem;
+    margin-top: 36px;
     display: flex;
     flex-direction: column;
     justify-content: center;
