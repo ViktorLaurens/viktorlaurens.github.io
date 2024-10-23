@@ -66,6 +66,27 @@
     --night-black: #131313; 
 }
 
+/* CUSTOM SCROLL BAR */
+::-webkit-scrollbar {
+    width: 20px;
+}
+
+::-webkit-scrollbar-track {
+    background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: #d6dee1;
+    border-radius: 20px;
+    border: 6px solid transparent;
+    background-clip: content-box;
+}
+  
+::-webkit-scrollbar-thumb:hover {
+    background-color: #a8bbbf;  
+}
+
+/* NAVIGATION BAR */
 .navbar {
     background-color: var(--black);
     color: var(--black);
@@ -263,7 +284,7 @@
     }
 }
 
-/* Horizontal bar */
+/* HORIZONTAL BAR */
 .horizontal-bar {
     width: 0;
     height: 4px; /* Thickness of the bar */
@@ -275,7 +296,7 @@
     z-index: 999; /* Make sure it appears above other content */
 }
 
-/* First section */
+/* FIRST SECTION */
 .first {
     background-color: var(--white);
 }
