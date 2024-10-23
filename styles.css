@@ -287,16 +287,16 @@
 }
 
 /* HORIZONTAL BAR */
-.horizontal-bar {
+/* .horizontal-bar {
     width: 0;
-    height: 4px; /* Thickness of the bar */
-    background-color: var(--syracuse-red-orange); /* Bar color */
+    height: 4px;
+    background-color: var(--syracuse-red-orange); 
     position: fixed;
-    bottom: 0; /* Position at the bottom */
+    bottom: 0;
     left: 0;
-    transition: width 0.3s ease-out; /* Smooth width change */
-    z-index: 999; /* Make sure it appears above other content */
-}
+    transition: width 0.3s ease-out; 
+    z-index: 999; 
+} */
 
 /* FIRST SECTION */
 .first {
