@@ -31,7 +31,7 @@ const chapterSlug = (id: string) => id.split('/').pop();
       <section class="chapters" aria-labelledby="chapters-title">
         <div class="section__head">
           <h2 id="chapters-title">Chapters</h2>
-          <p class="eyebrow">{chapters.length} written · 2 planned</p>
+          <p class="eyebrow">{chapters.length} parts</p>
         </div>
         <ol class="chapters__list">
           {chapters.map((c) => (
@@ -46,8 +46,6 @@ const chapterSlug = (id: string) => id.split('/').pop();
               </a>
             </li>
           ))}
-          <li class="chapter chapter--planned"><span class="chapter__num mono">07</span><span class="chapter__body"><span class="chapter__title">Classical control</span><span class="chapter__summary">LQR balancing, energy-based swing-up, MPC. Planned.</span></span></li>
-          <li class="chapter chapter--planned"><span class="chapter__num mono">08</span><span class="chapter__body"><span class="chapter__title">Reinforcement learning</span><span class="chapter__summary">PPO and SAC in a MuJoCo + Gymnasium environment. Planned.</span></span></li>
         </ol>
       </section>
     )}

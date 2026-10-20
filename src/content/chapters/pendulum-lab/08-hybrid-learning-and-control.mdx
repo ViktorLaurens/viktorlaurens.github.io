@@ -1,0 +1,1146 @@
+---
+project: pendulum-lab
+number: 8
+title: "Hybrid learning and control"
+summary: "Reinforcement learning from scratch and made safe, learning-enhanced MPC, residual RL, certifying a learned controller, learning to tune, and the step from the pendulum to underwater manipulation."
+---
+import Figure from '../../../components/Figure.astro';
+
+Every controller of chapter 7 was built from a model and an argument: a linearization, an
+energy function, a plan, a Riccati equation, a terminal set. This chapter lets **learning**
+into the loop. It starts with the most radical version, a controller learned from scratch by
+trial and error, and asks what it can do that chapter 7 could not, and what it gives up. The
+later sections combine the two: learning behind a safety filter, learning inside an MPC,
+learning on top of a classical controller, certifying what was learned, and tuning a classical
+controller by experiment. The last section maps it all onto underwater manipulation (see the
+[storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)).
+
+The code is in `src/pendulum_lab/furuta_rl.py`;
+the numbers come from `scripts/evaluate_rl.py`. The
+[controller gallery](/projects/pendulum-lab/controller-gallery/) shows the agents of this chapter next to the controllers of
+chapter 7, on the same pendulum.
+
+**The test loop** is that of chapter 7: designed or trained on the model identified in
+section 6.5, tested on the "real" pendulum with its dry friction, at $500\ \text{Hz}$, with the
+voltage held between samples and limited to $\pm 10$ V.
+
+## 8.1 Reinforcement learning from scratch
+
+### The problem as the agent sees it
+
+Reinforcement learning turns control into a game. At each step the **agent** sees an
+observation of the state, chooses an action and receives a reward; it learns a **policy**,
+a map from observations to actions, that collects as much reward as possible over time. It is
+never told the equations of motion. Here:
+
+- **The environment** is the simulator of chapter 6 with the identified model, wrapped in
+  the standard [Gymnasium](https://gymnasium.farama.org/) interface. A test checks that it is
+  exactly the closed loop of chapter 7: the LQR gives the same trajectory through the
+  environment as through `run_loop`, to $10^{-9}$.
+- **The action** is the voltage, chosen every 10 ms and held for five encoder samples, within
+  $\pm 8$ V, the limit the swing-up plans and the NMPC of chapter 7 used.
+- **The observation** is the state $(\alpha, \sin\theta, \cos\theta, \dot\alpha, \dot\theta)$:
+  the pendulum's angle as a point on the circle, so that a full turn changes nothing. It is the
+  true state, as in the comparisons of chapter 7; section "The gap to reality" puts the
+  encoders and the EKF back.
+- **The reward** is the stage cost of the NMPC of section 7.7 with its sign flipped, scaled so
+  that hanging still costs 1 per step:
+
+$$
+r = -\tfrac{1}{40} \left( 10 \thinspace (2 + 2 \cos\theta) + 0.1 \thinspace \alpha^2 +
+0.5 \thinspace \dot\alpha^2 + 0.01 \thinspace \dot\theta^2 + 0.002 \thinspace V^2 \right).
+$$
+
+The agent and the NMPC therefore chase **the same objective**. The NMPC finds its voltage by
+optimizing over a model at every step; the agent by remembering what worked.
+
+- **An episode** starts from a random state, with the pendulum at any angle, and runs its full
+  length: nothing ends it early, so the agent cannot escape the cost by failing fast.
+
+The agent is **soft actor-critic** (SAC; Haarnoja and colleagues, 2018), from
+[stable-baselines3](https://stable-baselines3.readthedocs.io/). A **critic** network learns
+how much reward to expect from a state and an action; an **actor** network learns the policy
+by climbing the critic, while being rewarded for staying random where it can, which keeps it
+exploring. Both have two layers of 64 units: four times faster than the default 256 on one
+CPU thread, at no visible loss here. Each agent trains for 300 000 steps, 50 minutes of
+simulated pendulum, in about 25 minutes of computer time. Ten agents train in parallel; every
+result below is shown for **five seeds**, because one run of reinforcement learning proves
+little.
+
+Two variants train side by side: **nominal**, on the identified model, and **randomized**, on
+a different pendulum every episode, every lumped parameter scaled by a random factor between
+$0.8$ and $1.2$ and the arm's dry friction anywhere up to 2 mN·m. This **domain
+randomization** (Tobin and colleagues, 2017) is the standard recipe for a policy that should
+survive the step from simulation to the real world.
+
+### It learns to swing up
+
+<Figure src="/media/pendulum-lab/rl_learning.png" width={100} alt="Left: the reward of a swing-up from rest against training steps for three rounds, median of five seeds; all rounds climb from about minus 450 to about minus 90 within 50 to 120 thousand steps, above the NMPC at minus 100 and far above the energy controller at minus 318; one seed of round 2 stays near minus 590. Right: the arm angle 10 seconds after a swing-up from rest for each of the 30 agents on a log scale; in rounds 1 and 2 almost all lie between 30 and 600 degrees; in round 3 six of ten lie at 2 to 18 degrees, near the NMPC at 6 and the energy controller at 16 degrees">
+
+Left: the reward of a swing-up from rest during training (the first 5 s), on the agents'
+own reward, against the controllers of chapter 7 on the same reward. Right: where the arm is
+10 s after that swing-up, for every agent
+
+</Figure>
+
+Starting from nothing, within 30 000 to 60 000 steps, five to ten minutes of simulated
+experience, every nominal agent of the first round learns to swing the pendulum up and hold
+it. After training, all five swing up from rest in $0.88$ to $1.16$ s, faster than the NMPC
+($1.49$ s) and four times faster than the energy controller of 7.3 ($4.57$ s). On their own
+reward they score $-74$ to $-86$, **better than the NMPC** ($-100$), which optimizes the same
+cost but only over a horizon of $1.5$ s and one Gauss–Newton step at a time.
+
+The randomized agents learn more slowly and less reliably. One seed of five never learns to
+balance at all; the others swing up in $1.04$ to $4.13$ s. Asked to be good on every pendulum
+within 20%, they are less good on the one that is there.
+
+### What the reward does not say
+
+The learning curve looks like success, and the swing-up times confirm it. But the run itself
+shows what the numbers hide:
+
+<Figure src="/media/pendulum-lab/rl_swingup.png" width={100} alt="Three panels over 10 seconds after a start from rest. Top: tilt from upright; the two learned policies and the NMPC are upright after about 1 to 1.5 seconds, the energy controller after about 4.5. Middle: the arm angle; the NMPC stays within 40 degrees and returns to zero, the energy controller swings to 300 degrees and returns to about 16; the round 1 agent drifts steadily to 162 degrees; the round 3 agent drifts to minus 110 degrees and slowly returns to zero between 4 and 10 seconds. Bottom: voltage; the round 3 agent chatters between plus and minus 6 volts from about 3.7 to 6 seconds while it brings the arm back">
+
+From rest on the real pendulum: a typical agent (the median score of five) of rounds 1 and 3
+against the energy controller and the NMPC
+
+</Figure>
+
+**The arm wanders off.** Of the ten agents of the first round, one brings the arm back after
+the swing-up, to $14^\circ$. For the other nine, 10 s after the start the arm stands anywhere
+between $32^\circ$ and $353^\circ$ from where it began, while the NMPC brings it back to
+$6^\circ$ and the energy controller to $16^\circ$. On a real bench, $300^\circ$ of arm travel winds up the cable. The reward does
+penalize the arm angle, but weakly, and the agent has found that it can ignore it.
+
+A first diagnosis blamed the training: episodes of 5 s, an arm that always starts near zero,
+and a discount $\gamma = 0.99$ that makes the agent look about $1 \thinspace \text{s}$ ahead
+($\tfrac{1}{1-\gamma}$ steps). **Round 2** therefore trained on 10 s episodes, with the arm
+anywhere in $\pm 180^\circ$ at the start and $\gamma = 0.995$, about $2 \thinspace \text{s}$
+ahead, with the same reward. It did not help: one agent of ten holds the arm, as before, and
+learning became harder (one seed never swung up). Checked during training, the arm's final
+position jumps from check to check: the policy never learns to control it at all.
+
+The real reason is the size of the arm's term. Near the top, where the drift starts, an arm
+off by $0.3 \thinspace \text{rad}$ costs $0.009$ per step, against up to $40$ for the
+pendulum's term. The critic, a network fitted to noisy returns, cannot resolve it. And
+correcting the arm needs a careful manoeuvre: because of the right-half-plane zero of section
+7.1, the arm must first move the wrong way, tilting the pendulum, which costs reward now for a
+benefit much later. The NMPC, with the same weights, finds that manoeuvre because it computes
+it from the model; the agent would have to stumble on it.
+
+**Round 3** therefore changes the reward: as round 2, with ten times the weight on the arm
+angle. This is **reward shaping**, the designer telling the agent what matters by hand; every
+agent is still scored on the NMPC's original cost. Now six agents of ten bring the arm back
+to within $20^\circ$, four of the five nominal ones within $2^\circ$ to $18^\circ$. It works,
+mostly; the price is a reward that is no longer the objective, but a hand-tuned proxy for it.
+
+**The voltage chatters.** In every round, some agents switch the voltage hard between
+samples, while simply balancing: two nominal agents of round 1 hold $4.7$ and $6$ V on
+average, switching sign every few samples, where the NMPC needs $0.2$ V. Measured as total
+variation, the sum of all voltage changes per second, three agents of round 1 reach 151 to
+1114 V/s; the NMPC needs 12, the energy controller 27.
+The reward charges $0.002 \thinspace V^2$, which a chattering policy hardly notices: its
+score is as good as a smooth one's. On a real motor it means heat, noise and a worn gearbox.
+The round 3 agent of the figure chatters exactly while it brings the arm back.
+
+Chatter is a matter of training on one exact model: **8 of the 15 nominal agents chatter,
+none of the 15 randomized ones** (at most 27 V/s). On a pendulum that changes every episode,
+the precise switching that pays off on one model is worth nothing, and the agent learns
+smooth control instead. Domain randomization did not buy robustness here (next section), but
+it did buy smoothness.
+
+### Pushes
+
+<Figure src="/media/pendulum-lab/rl_push.png" width={100} alt="Two maps of the time until balanced after the 120 pushes of section 7.4, for a typical agent of round 1 and of round 3; both are balanced after every push, mostly within 1 to 2.5 seconds, with a few cells near 3 to 4 seconds; all five seeds of each round balance after every push">
+
+The time until balanced after the pushes of section 7.4, for a typical agent of rounds 1 and
+3
+
+</Figure>
+
+The push test of 7.4 kicks the pendulum mid-swing, at ten times and twelve sizes. The
+learned policies are very good at it: every nominal agent of rounds 1 and 3 balances after
+all 120 pushes, with medians of $1.4$ to $2.5$ s and the worst case at $2.7$ to $3.9$ s.
+
+| Controller | Balanced after | Median | Worst |
+|---|---|---|---|
+| TVLQR (7.4) | 88% | 1.47 s | 2.39 s |
+| energy + LQR (7.3) | 100% | 3.42 s | 5.88 s |
+| hybrid: plan, else energy (7.4) | 100% | 1.83 s | 6.96 s |
+| NMPC (7.7) | 100% | 1.55 s | 5.27 s |
+| SAC round 1, five nominal agents | 100% | 1.50 to 1.72 s | 2.75 to 3.89 s |
+| SAC round 3, five nominal agents | 100% | 1.43 to 2.48 s | 2.72 to 3.62 s |
+
+That is no accident: the agent trained on episodes that start from **any** pendulum angle and
+speed, so a push only puts it in a state it has seen before. A plan-based controller sees a
+push as a failure of the plan; a policy trained everywhere has no plan to fail. The round 2
+agents are less consistent (five of ten balance after every push), as their swing-up was.
+
+### The gap to reality
+
+The policies were trained on the identified model and tested on the "real" pendulum, and the
+two might as well be the same pendulum: the identified parameters match the real ones to
+within 0.2%, thanks to chapter 6's identification. Between them, there is no gap to cross. Four things do differ from training, and each was
+measured, swinging up from rest, for every agent and for the controllers of chapter 7:
+
+- **Encoders and an estimator.** The policy was trained on the true state; on a bench it
+  gets two encoder counts. Behind the online EKF of section 6.6, every swing-up time changes
+  by at most $0.2$ s. One marginal agent (round 3, randomized, seed 0, the lowest score of its
+  round) loses the swing-up behind the EKF.
+- **A different simulator.** [MuJoCo](https://mujoco.org/) derives the equations of motion
+  itself, from bodies and joints. With the same parameters and its RK4 integrator, it
+  reproduces our simulator to $2 \cdot 10^{-4}$ degrees over 5 s, in a free swing, with the
+  arm spinning and with a voltage pulse: the cross-check of chapter 6's equations, planned for
+  6.2. MuJoCo's default integrators, Euler and implicitfast, drift by $42^\circ$ to $330^\circ$
+  in the same 5 s without damping, so the choice of RK4 in 6.2 was right.
+  As a test pendulum it then gets two effects our model leaves out: the inertia of the motor's
+  rotor and hub, $4.6 \cdot 10^{-6} \thinspace \text{kg m}^2$, which turns with the arm, and
+  **true** dry friction, which holds the arm still below its breakaway torque instead of
+  letting it creep like the smooth $\tanh$ of section 6.5 (a test checks that MuJoCo holds the
+  arm to $0.002^\circ$ where our model creeps $2.2^\circ$). Swing-up times change by at most
+  $0.15$ s; the same marginal agent fails.
+- **Delay.** With the voltage arriving 2, 4 or 8 ms late, every agent that swings up without
+  delay still does. Its time can change by a second or more either way, because a slightly
+  different first swing may come over the top a swing earlier or later. The NMPC hardly
+  changes. The energy controller,
+  which needs the timing of its switch to LQR, fails at 8 ms.
+- **A payload.** A mass at the pendulum's tip changes the dynamics far more than anything
+  else here: with 20 g (the pendulum itself weighs 24 g), 9 of the 10 round 1 agents still
+  swing up and balance, the NMPC too (in $7.2$ s), the energy controller not. With 50 g,
+  **one agent of 30 succeeds**, and no controller of chapter 7. With 100 g, nothing does. The
+  randomized agents, trained on pendulums up to 20% off, are no better: a 50 g payload is
+  far outside what they have seen. And round 3's stronger arm weight costs payload tolerance
+  (5 of 10 agents at 20 g, against 9 in round 1).
+
+| Swing-up from rest | true state | EKF | MuJoCo | delay 8 ms | 20 g | 50 g |
+|---|---|---|---|---|---|---|
+| energy + LQR (7.3) | 4.57 s | 4.58 s | 3.52 s | fails | fails | fails |
+| NMPC (7.7) | 1.49 s | 1.49 s | 1.49 s | 1.52 s | 7.18 s | fails |
+| SAC round 1, nominal (5) | 0.88 to 1.16 s | within 0.01 s | within 0.01 s | 5 of 5 | 5 of 5 | 0 of 5 |
+| SAC round 3, nominal (5) | 0.70 to 2.35 s | within 0.01 s | within 0.15 s | 5 of 5 | 3 of 5 | 0 of 5 |
+
+For this pendulum, then, the gap that matters is not the mechanics or the sensing, which
+chapters 6 and 7 got right, but **a change in the plant itself**, which no controller here
+anticipates. Section 7.5 met the same wall from the other side: a payload is easy to estimate
+while swinging, hard while balancing.
+
+### What we learned
+
+- **Learning from scratch works, and fast.** In minutes of simulated experience, with no
+  model and no argument, SAC learns a swing-up faster than the NMPC and a balance that
+  survives every push. On the NMPC's own objective it scores better than the NMPC.
+- **The agent optimizes exactly what it is paid for.** A weak term in the reward is a term
+  the agent ignores: the arm wandered off in 18 of 20 agents with the NMPC's weights, and
+  nothing in the learning curve showed it. Fixing it took reward shaping, by hand, and still
+  worked for six agents of ten. A planner with the same weights did not need it.
+- **What the reward does not penalize, the agent may do.** Half the nominal agents chatter;
+  their score does not show it. Randomizing the model removed it.
+- **Seeds matter.** Agents with identical settings differ by a factor of three in swing-up
+  time, and some never learn. A result of reinforcement learning is a distribution, and one
+  run is an anecdote.
+- **No learned policy here comes with a guarantee.** Every number above is a test, not a
+  proof: none says the arm stays within its limit, or that a state not tested is safe. That
+  is where the next section starts.
+
+## 8.2 Safe reinforcement learning
+
+An agent learns by trying things, and most of what it tries early on is wrong. In 8.1 that
+cost nothing, because the pendulum was simulated. On a bench, or on an underwater manipulator,
+a bad try hits an end stop, winds up a cable or swings a tool into the structure. **Safe
+reinforcement learning** asks for two things: the agent must respect the limits **while it
+learns**, not only afterwards, and the result must still be good at the task.
+
+The tool is the barrier-function filter of section 7.8. It sits between any controller and the
+motor and changes the proposed voltage as little as possible, so that the arm stays within
+its limit. Here the limit is $\pm 45^\circ$; the NMPC swings up within $38^\circ$, so the task
+is possible within it.
+
+### The setup
+
+Round 1 of 8.1, the round that learned best, with the NMPC's own reward: no arm shaping this
+time. The reward carries the objective, the filter the limit. Three variants, five seeds each:
+
+- **free:** trained without the filter, as in 8.1;
+- **filtered:** the filter in the environment from the first step: every voltage the agent
+  proposes passes it at every encoder sample, exactly as it would on the bench;
+- **penalized:** as filtered, and every correction costs $0.1 \thinspace \Delta V^2$ in the
+  units of the stage cost, so that the agent has a reason to propose voltages the filter
+  leaves alone.
+
+A test checks that the filtered environment is exactly `run_loop` with the filter, as in 8.1.
+Every agent is then deployed twice: **bare**, and **behind the filter**.
+
+The filter's gains needed care. The barrier is a condition in continuous time, but the voltage
+is held for 2 ms. With the gains of 7.8 ($\ell_1 = 20$, $\ell_2 = 50$) an agent that slams the
+arm into the limit crossed it by $0.003^\circ$; with $\ell_1 = 10$, $\ell_2 = 30$ it stays
+inside in every test, and with $\ell_1 = 5$, $\ell_2 = 20$ the filter brakes from far away and
+the arm stops at $42^\circ$, taking room the task needs.
+
+### Safe while learning
+
+<Figure src="/media/pendulum-lab/safe_training.png" width={100} alt="Left: the share of training time with the arm beyond 45 degrees, against training steps; for the agents trained without the filter it lies between 12 and 69 percent throughout, the median ending near 43 percent; for both filtered variants it is zero. Right: the reward of a swing-up from rest during training; all three variants learn within 30 to 70 thousand steps and end near the NMPC's minus 100, the free agents slightly above">
+
+Left: how much of the training time so far the arm spent beyond its limit, every agent.
+Right: the reward of a swing-up from rest during training, each deployed as trained
+
+</Figure>
+
+The free agents spend **31% to 65%** of their training time with the arm beyond $45^\circ$:
+460 000 to 970 000 encoder samples each, with the arm turning up to $1184^\circ$. Exploration
+is not a gentle process. (These are the agents of round 1 of 8.1 again: same seeds, same
+settings, the same rewards to the last digit.) Behind the filter, three filtered agents of five
+and four penalized ones never cross the limit at all. The other three do, for 2 to 914 samples
+in all of training, by at most $0.09^\circ$: an agent that leans on the limit thousands of times
+finds the rare state in which the barrier slips, through the held voltage (see the gains above)
+or the voltage limit (see the pushes below). A margin of a fraction of a degree, as in 7.8,
+would absorb such slips.
+
+And the filter hardly slows learning: all three variants swing up after 30 000 to 70 000
+steps, and end, deployed as trained, at $-74$ to $-86$ (free, which ignores the limit),
+$-83$ to $-107$ (filtered) and $-84$ to $-104$ (penalized), around the NMPC's $-100$. Safety
+costs the agent 10% to 20% of its score: the medians are $-85$, $-97$ and $-101$.
+
+### A filter added afterwards is not the same
+
+The obvious shortcut is to train freely in simulation and add the filter only when deploying.
+It fails:
+
+<Figure src="/media/pendulum-lab/safe_swingup.png" width={100} alt="Three panels over 10 seconds from rest. Top: tilt from upright; the free agent without filter, and the filtered and penalized agents behind the filter, balance from about 1.5 seconds; the free agent with the filter added afterwards balances briefly, falls and swings up again about every 1.4 seconds. Middle: the arm; the free agent without filter drifts to 162 degrees, far beyond the 45 degree limit; with the filter added it runs into the limit, falls, returns and runs into it again; the filtered and penalized agents stay within about 40 degrees and settle at minus 19 and plus 18 degrees. Bottom: voltage; the free agent with the filter shows a burst of plus and minus 8 volts at each new swing-up, the penalized agent chatters at about plus and minus 1 volt throughout">
+
+From rest on the real pendulum, a typical agent (median score) of each variant: free, bare
+and with the filter added; filtered and penalized, behind the filter as trained
+
+</Figure>
+
+The free agent, deployed bare, swings up in about 1 s and then lets the arm wander far past
+the limit, as in 8.1. With the filter added, it swings up, drives the arm into the limit as
+it always did, is braked, drops the pendulum, swings it up again and repeats: it never learned
+that the limit exists. Three of the five free agents never balance behind the filter, a fourth
+only after $9.4$ s; after the pushes, four of five balance in at most 12% of the cases. The
+filter has to change 12% to 50% of their voltages. Only the one free agent whose arm happened
+to stay near the limit anyway (at most $47^\circ$) works behind it.
+
+Trained behind the filter, the agents **work with it**. It changes only 3% to 7% of their
+voltages; four filtered agents of five, and all five penalized ones, swing up in $0.9$ to
+$1.9$ s and balance after 95% to 100% of the pushes. The arm, which wandered off in 8.1,
+now stays within the limit by construction, but it settles where it happens to be, at
+$-20^\circ$ to $+34^\circ$, not at zero: the filter keeps the arm inside, the weak reward term
+still does not bring it home.
+
+| 120 pushes of 7.4 | trained without filter | trained behind it | behind it, corrections charged |
+|---|---|---|---|
+| deployed bare: balanced | 100% (all 5) | 16% to 100% | 93% to 100% |
+| deployed bare: arm beyond the limit | 64% to 100% of pushes | 46% to 100% | 26% to 100% |
+| behind the filter: balanced | 0% to 12% (one seed 100%) | 100% (one seed 18%) | 95% to 100% |
+| behind the filter: arm beyond the limit | at most 2% | at most 2%, up to $52^\circ$ | none |
+
+<Figure src="/media/pendulum-lab/safe_pushes.png" width={100} alt="Two strip charts with one mark per seed for six cases: each of the three variants deployed bare and behind the filter. Left: the share of the 120 pushes after which the pendulum balances; free bare 100 percent, free with filter 0 to 12 percent and one seed at 100, filtered with filter 100 percent and one seed at 17, penalized with filter 95 to 100 percent. Right: the share of pushes in which the arm went beyond 45 degrees; bare deployments 26 to 100 percent, behind the filter 0 to 2 percent">
+
+Each mark is one agent and 120 pushes: hollow diamonds deployed bare, filled circles behind
+the filter
+
+</Figure>
+
+Two more lessons sit in this table:
+
+- **The agents do not learn the limit itself.** Deployed bare, the filtered and penalized
+  agents cross it after most pushes, and even from rest, with the arm reaching up to
+  $64^\circ$ and $81^\circ$.
+  They have learned to rely on the filter, not to replace it. The penalty helps a little, but
+  not enough: the filter stays part of the controller.
+- **A barrier is only a guarantee within the motor's limits.** Behind the filter, a few pushes
+  still take the arm past $45^\circ$, up to $52^\circ$. The four crossings examined (two
+  agents) all follow hard pushes mid-swing, of $6$ to $8 \thinspace \text{rad/s}$, with the arm
+  already moving at about $6 \thinspace \text{rad/s}$ towards the limit. In three of them,
+  near the limit, the barrier asks for more braking than $\pm 10$ V can give: no safe voltage
+  exists. The fourth, by $0.9^\circ$, is the held voltage again. The
+  barrier condition knows nothing about the input limit; a filter that does, such as the
+  predictive one of 7.8, has to plan ahead and so needs a set of states from which safety can
+  be kept for good, which section 7.8 could only compute near upright. The penalized agents,
+  which learned to stay away from the limit, never met such a state.
+
+The classical controllers behave as expected behind the filter. The NMPC stays within
+$38^\circ$ on its own, and the filter changes 2% of its voltages without changing its swing-up.
+The energy controller of 7.3, which swings the arm through $317^\circ$, is held within
+$34^\circ$ and, surprisingly, swings up in $1.86$ s instead of $4.57$: kept from running
+away, its arm pumps energy into the pendulum more efficiently.
+
+### What we learned
+
+- **Unfiltered exploration is mostly unsafe.** A free agent spends a third to two thirds of
+  its training beyond the limit. On a real robot that rules out learning without protection.
+- **A filter in the loop makes learning safe at little cost.** With the barrier in the
+  environment, the agents learned as fast as without it, crossed the limit by at most
+  $0.09^\circ$, and scored 10% to 20% below the free agents, about as well as the NMPC.
+- **Train with the filter you deploy.** A filter added only at deployment fights a policy that
+  never learned the limit, and four of five such agents fail. Trained behind it, the policy
+  adapts and the filter barely has to act.
+- **The filter does not become unnecessary.** Agents trained behind it still need it; charging
+  them for its corrections makes them keep further away, enough to avoid the states where even
+  the filter fails, but not enough to deploy without it.
+- **A guarantee is only as good as its assumptions.** The barrier assumes the voltage it asks
+  for is available. When it is not, after a hard push mid-swing, the limit is crossed. A
+  guarantee that includes the input limit needs a controlled invariant set, which brings back
+  the computational problem of 7.6 and 7.8.
+
+## 8.3 Learning-enhanced MPC
+
+Sections 8.1 and 8.2 replaced the model with experience. This section keeps the controller of
+7.7, the nonlinear MPC, and lets learning improve **its model**. That is the most common way
+learning enters control in practice: the optimizer and its constraints stay, only the
+prediction gets better (Hewing, Wabersich, Menner and Zeilinger, 2020, review the field).
+
+The code is in
+`src/pendulum_lab/furuta_learning_mpc.py`.
+
+### A pendulum the NMPC does not know
+
+8.1 showed that the identified model matches the "real" pendulum to 0.16%: there is nothing to
+learn. So the pendulum has to change. Two changes, both chosen so that the NMPC with its
+nominal model fails to swing up, while an NMPC that knows the change succeeds:
+
+- **A 50 g payload at the tip** (the pendulum itself weighs 24 g). The exact model swings it up
+  in $1.99$ s. A payload changes only the lumped parameters $a, b, c, d$: it stays **inside**
+  the model structure.
+- **Quadratic drag on the pendulum**, a torque $-c_D \thinspace |\dot\theta| \thinspace \dot\theta$
+  with $c_D = 10^{-5} \thinspace \text{N m s}^2$, as on a link moving through water (the Morison
+  drag of an underwater manipulator). It reaches about $5 \thinspace \text{mN m}$, a third of
+  the gravity torque. The exact model swings up in $2.12$ s. Our model has only viscous
+  friction: the drag lies **outside** its structure.
+
+Three times more drag and even the exact model fails within $\pm 8$ V. A change outside the
+model that matters, but leaves the task possible, is hard to find on this pendulum.
+
+Both start $5^\circ$ from hanging: from exactly at rest every gradient is zero and the NMPC
+does not start without a plan (7.7).
+
+### Learning from attempts
+
+The NMPC tries to swing up the changed pendulum for 6 s and records the encoder angles and
+its voltage. From all attempts so far, it improves its model, then tries again, six times.
+The model can improve in three ways:
+
+- **physics:** identify the lumped parameters again, with the method of section 6.4:
+  regression for a first guess, then output error on short segments;
+- **network:** keep the nominal model and learn what it gets wrong, a network from the state
+  and voltage to the error in both accelerations (two layers of 32 units);
+- **both:** the network on top of the re-identified physics.
+
+The network sits inside the NMPC's prediction: every step of the plan integrates the physical
+model plus the network's correction, and the NMPC's linearization, by finite differences,
+picks it up unchanged. Its training data are the accelerations the encoders imply, from the
+Savitzky–Golay filters of chapter 2.
+
+The physics needed one change from 6.4. There, the output-error segments lasted $0.5$ s, on
+data near hanging. Here the data include balancing upright, where an error grows like
+$e^{12.8 t}$: by a factor of 600 over $0.5$ s. The fit then took 600 to 800 s instead of 2;
+segments of $0.2$ s (a factor of 13) give the same parameters in 2 s.
+
+### Physics wins, the network fails
+
+<Figure src="/media/pendulum-lab/lmpc_attempts.png" width={100} alt="Four panels. Top: the error of the model used in each attempt, along the swing-up the NMPC needs, relative to the nominal model's, on a log scale, for five ways of learning; for both the payload and the drag, re-identified physics sits at 0.05 and 0.1 from the second attempt on; the plain network and the network on the physics wander between 0.2 and 4; the cautious network on the nominal model creeps down from 0.6 to 0.4 for the payload and stays near 0.15 for the drag; the cautious network on the physics sits between 0.1 and 0.2. Bottom: the time until balanced in each attempt, or failed; physics balances from attempt 2 on in every attempt, at the exact model's 2 seconds; the cautious network on the physics balances in attempt 2 and mostly fails afterwards; the plain networks almost always fail">
+
+Top: how wrong the model used in each attempt is, along the swing-up the NMPC needs (1: as
+wrong as the nominal model). Bottom: the time until balanced in each attempt; crosses failed.
+Thin lines and individual marks: three seeds of the network
+
+</Figure>
+
+**Re-identified physics** succeeds from the second attempt on, in every attempt, for both
+changes. After the payload, it finds $a, b, c, d$ exactly and swings up in $1.99$ s, as the
+exact model does; from three starts it never saw, it balances as fast as the exact model. Even
+the drag, which it cannot represent, it absorbs into slightly different parameters (0.5% to
+2.5% off) and a model 9% to 13% wrong along the swing-up, close enough: $2.11$ to $2.14$ s
+against the exact model's $2.12$.
+
+**The network** fails. On the nominal model, one seed of three balances the payload once, in
+the sixth attempt; none ever balances against the drag. **On top of the physics**, which alone
+succeeds, it fails every attempt: it makes a working model worse. Along the swing-up, its
+models are wrong by anything from 20% to ten times the nominal model's error, often worse than
+no learning at all.
+
+### Why: extrapolation and noise
+
+The diagnosis takes the data of the first, failed attempt and trains the network twice: on the
+error the encoders show, and, as a test, on the **true** error, without any noise. Then it
+measures the error left, on the states of the data and along the swing-up the NMPC needs.
+
+<Figure src="/media/pendulum-lab/lmpc_diagnosis.png" width={100} alt="Two bar charts on a log scale, for the payload and for the drag. For the payload, trained on the noise-free error the network leaves 0.03 on the data but 2.03 along the swing-up; trained on the error from the encoders, 0.22 on the data and 0.61 along the swing-up; cautious, both about 0.84. For the drag, trained on the encoders' error the network leaves 1.58 on the data and 4.07 along the swing-up; on the true error 0.06 and 0.32; cautious 1.19 and 0.75">
+
+The error the network leaves after one failed attempt, relative to the nominal model's: where
+the data are, along the swing-up the NMPC needs, and along it with a cautious network
+
+</Figure>
+
+The two changes fail for two different reasons:
+
+- **Payload: extrapolation.** The failed attempt swung the pendulum to $96^\circ$ from hanging
+  at most; it never came near upright. Trained on the true error, the network learns the data
+  almost perfectly, 3% left, but along the swing-up it is **twice as wrong as no network at
+  all**. It has never seen the states where the NMPC needs it most. The noisy version is
+  "better" there, but only because the noise kept it from learning anything sharp.
+- **Drag: noise.** The model error is only $6$ to $18 \thinspace \text{rad/s}^2$, while the
+  accelerations estimated from the encoders are uncertain by $10$ to $14 \thinspace
+  \text{rad/s}^2$. Trained on them, the network does not even learn the data (158% error left);
+  trained on the true error, 6%.
+
+The physics has neither problem. Its structure **extrapolates**: four numbers fitted on small
+swings are the same four numbers upright. And it averages the noise over every sample of every
+segment, with only seven unknowns.
+
+### A cautious network
+
+Learning-based MPC in the literature does not trust a network everywhere. The Gaussian process
+MPC of Hewing, Kabzan and Zeilinger (2020) uses the process's variance to know where it has no
+data. The simplest version of that idea: multiply the network's correction by
+$\exp({-\tfrac{d^2}{w^2}})$, with $d$ the distance to the nearest training point in the network's scaled
+inputs and $w = 0.2$. Near the data the correction counts fully; far from it, it fades and the
+NMPC falls back on its base model. It cannot do harm where it knows nothing.
+
+In the diagnosis, the cautious network is never much worse than none: $0.75$ to $0.85$ of the
+nominal error along the swing-up (only the noisy drag reaches $1.19$), instead of up to $4$.
+In the attempts, two new things happen:
+
+- **Caution without exploration gets stuck.** On the nominal model with the payload, the
+  cautious network never succeeds. The NMPC with an untrusted correction is the nominal NMPC,
+  which never gets near upright, so the data never get there either: after six attempts the
+  network trusts itself on 12% of the swing-up. It must succeed to learn and learn to succeed.
+  This is the dilemma of **dual control**: a controller that learns must also act to gather
+  the data it needs, which no cautious method does by itself.
+- **Once trusted, the noise comes back.** Wherever the cautious networks do succeed, in the
+  second attempt (on the physics for both changes, on the nominal model for the drag), they
+  mostly **fail again afterwards**. The successful attempt brings data from upright; the
+  network now trusts itself on 84% to 95% of the swing-up, and there it is as noisy as before.
+  On the payload, on top of exact physics, its model gets two to four times worse than the
+  physics alone, and 11 of the 12 attempts after the first success fail. Caution protects against
+  extrapolation, not against noise.
+
+| Attempts 2 to 6 (networks: three seeds) | payload: attempts balanced | drag: attempts balanced |
+|---|---|---|
+| physics (no randomness: one run) | 5 of 5 | 5 of 5 |
+| network on the nominal model | 1 of 15 | 0 of 15 |
+| network on the physics | 0 of 15 | 0 of 15 |
+| cautious network, nominal model | 0 of 15 | 4 of 15 |
+| cautious network on the physics | 4 of 15 | 9 of 15 |
+
+### What we learned
+
+- **A better model makes the NMPC work, and the NMPC needs it where it matters.** With the
+  right model, a payload that defeated every controller of chapters 7 and 8.1 is swung up in
+  2 s, from the second attempt on.
+- **Structure beats flexibility on small data.** Four physical parameters, refitted on two
+  failed or successful attempts, are exact for the payload and close enough for drag they
+  cannot express. A network with 1300 weights, on the same data, extrapolates wildly
+  where the controller goes next, and learns the noise of encoder-derived accelerations.
+- **Where the data are not, a learned model should not count.** Fading the correction away
+  from the data made it harmless, the minimum any learned model inside a controller must be.
+- **But caution is not learning.** A cautious learner that cannot reach the states it needs
+  stays stuck there, and one that reaches them still learns its noise. Better estimates of the
+  states (the smoother of 5.8 instead of a filter), learning in the space of whole trajectories
+  instead of accelerations, and exploration on purpose are where this would go next.
+- **On an underwater manipulator** the balance shifts: added mass, buoyancy and drag are
+  partly known in structure (Fossen's models) and partly not. The lesson here is to learn the
+  parameters of whatever structure is known, and add a cautious learned term only for what is
+  left, only where there are data, and only with clean enough signals to learn it.
+
+## 8.4 Residual reinforcement learning
+
+8.1 learned a controller from nothing; 8.3 learned a model for an optimizer. The third way to
+combine the two is to keep a classical controller and let learning **correct** it: the voltage
+is that of the base controller plus a learned correction,
+
+$$
+V = V_{\text{base}}(\mathbf x) + \Delta V_\phi(\mathbf x).
+$$
+
+This is **residual reinforcement learning** (Johannink and colleagues, 2019; Silver and
+colleagues, 2018). The agent does not have to discover swinging up; it only has to improve on a
+controller that already does it. The promise: faster learning, the base's good habits kept,
+and a controller that is still roughly the one an engineer understands.
+
+### The setup
+
+The base is the energy swing-up with the LQR hand-over of section 7.3. It works and comes with
+an argument: the energy rises to the upright value, and the LQR balances within its
+Lyapunov region. But it is slow ($4.57$ s from rest), swings the arm through $317^\circ$, and
+fails with a 20 g payload or a delay of 8 ms (8.1). Plenty to improve.
+
+The base acts at every encoder sample; every 10 ms the agent adds a correction, held for five
+samples, and sees the state and the base's voltage. The sum is limited to the amplifier's
+$\pm 10$ V, the range the base itself uses. A test checks that with a zero correction the
+environment is exactly the base in `run_loop`, and another that the deployed controller is
+exactly the environment. Round 1's training and the NMPC's reward, as in 8.1. Four variants,
+five seeds each:
+
+- **residual:** a correction up to $\pm 8$ V, enough to overrule the base entirely;
+- **bounded:** a correction up to $\pm 2$ V, enough only to nudge it;
+- **trained on payloads:** with and without the base (correction up to $\pm 8$ V, or from
+  scratch as in 8.1), on a pendulum with a random payload of 0 to 50 g every episode.
+
+Each agent trains in about 45 minutes, twice as long as in 8.1: the base controller runs in
+Python at every sample.
+
+### Faster, but not from the start
+
+<Figure src="/media/pendulum-lab/res_learning.png" width={100} alt="Two panels of the reward of a swing-up from rest against training steps, median of five seeds. Left, trained on the identified model: from scratch the reward climbs from minus 470 and passes minus 150 after about 40 thousand steps; on the base with a correction up to 8 volts it starts at about minus 370, below the base alone at minus 318, and passes minus 150 after 20 thousand steps; with a correction up to 2 volts it starts at minus 250, already better than the base, and passes minus 150 after 20 thousand steps; all end between minus 70 and minus 110, around the NMPC's minus 100. Right, trained on payloads of 0 to 50 grams: on the base the median reaches minus 100 after 30 thousand steps and stays there; from scratch it wanders between minus 220 and minus 110, and some seeds fall back to minus 500">
+
+The reward of a swing-up from rest during training, on the identified model (left) and on
+pendulums with a random payload (right), median of five seeds
+
+</Figure>
+
+On the identified model, every residual agent passes a reward of $-150$ after 20 000 to 30 000
+steps, against 30 000 to 60 000 from scratch: about **twice as fast**. On pendulums with
+payloads, where learning is harder, the difference is larger: 30 000 to 50 000 steps on the
+base, against 40 000 to 110 000 from scratch, and one of the five agents from scratch never
+learns at all.
+
+But the start is not free. After 10 000 steps, the agents with a $\pm 8$ V correction score
+$-352$ to $-400$, **worse than the base alone** ($-318$): a correction that has learned
+nothing yet disturbs a controller that works. The bounded agents, whose correction cannot
+exceed $\pm 2$ V, are already better than the base at that point ($-235$ to $-265$). That is
+the usual argument for keeping the residual small at first.
+
+### Large correction, small correction
+
+<Figure src="/media/pendulum-lab/res_swingup.png" width={100} alt="Three panels over 10 seconds after a start from rest on the real pendulum. Top: tilt from upright; the base alone balances after about 4.5 seconds, after several swings; from scratch, and on the base with either correction, the pendulum is upright within about 0.7 to 1.5 seconds. Middle: the arm; the base swings it to 300 degrees and returns it to about 16; from scratch it drifts to 162 degrees; with the large correction it settles at about 58 degrees; with the small correction it returns to about minus 3. Bottom: voltage; the base swings between plus and minus 10 volts for 4 seconds; the small correction chatters at about plus and minus 2 volts for half a second">
+
+From rest on the real pendulum: the base alone, and a typical agent (median score) from
+scratch and on the base with a large and with a small correction
+
+</Figure>
+
+With a **large correction** the residual is not small: it averages $1.4$ to $5.6$ V over a
+swing-up, of the same order as the base's voltage. In effect it is a new controller that
+starts from the base. It is slightly better than learning from scratch (rewards $-65$ to $-83$
+against $-74$ to $-86$, swing-ups in $0.72$ to $1.22$ s), it does **not chatter** (at most
+52 V/s, against up to 1114 for the agents from scratch), and it keeps the arm closer ($7^\circ$
+to $63^\circ$ after 10 s, against $32^\circ$ to $162^\circ$). But the base's own care for the arm
+is mostly gone: one agent of five brings it back within $20^\circ$.
+
+With a **small correction**, averaging $0.8$ to $1.8$ V, the base stays recognizable. The
+swing-up takes $1.24$ to $1.71$ s, three times faster than the base, and its score falls between
+the base and the free agents ($-94$ to $-121$). The voltage stays calm (at most 43 V/s); two
+agents of five bring the arm back within $3^\circ$. After the hardest pushes it recovers more
+slowly (the worst push takes $4.8$ to $7.4$ s, against $2.8$ to $3.3$ s with the large
+correction), like the base itself ($5.9$ s).
+
+<Figure src="/media/pendulum-lab/res_robustness.png" width={100} alt="A grid of seven tests for six controllers, each cell showing how many of the agents pass. The base alone swings up from rest, brings the arm back and keeps the voltage calm, balances after every push, but fails with 20 grams, 50 grams and a delay of 8 milliseconds. From scratch: every agent swings up, handles 20 grams and the delay, none brings the arm back, two of five are calm, none handles 50 grams. On the base with a correction up to 8 volts: all five handle everything except 50 grams, one of five brings the arm back, all are calm. With a correction up to 2 volts: the same, two of five bring the arm back. Trained on payloads, from scratch: four of five swing up, three of five handle 50 grams, one is calm. On the base, trained on payloads: five of five swing up, four of five handle 50 grams, two of five are calm">
+
+How many of the five agents of each variant (the base: one controller) pass each test, on the
+real pendulum; the last column is the share of the 120 pushes of 7.4 after which the pendulum
+balances
+
+</Figure>
+
+The table shows what the correction buys. **The base alone fails with a 20 g payload and with
+a delay of 8 ms; with a correction of at most 2 V, all five agents handle both.** The
+correction repairs exactly the weak spots of the base (its fixed energy target and its timing),
+without being given a model of the payload or the delay: they were never in training.
+
+### When the pendulum changes
+
+Trained on pendulums with a random payload of 0 to 50 g, four of the five agents on the base
+swing up the 50 g payload from rest, in $1.97$ to $2.91$ s: no controller of chapter 7 does,
+and one agent of the 30 of 8.1. From scratch, three of five do, one of the five never learned to balance
+at all, and every one that learned chatters (402 to 1203 V/s). On the base, two of five
+chatter. A base controller makes learning on a changing pendulum more reliable, and its
+result smoother.
+
+### What residual learning does not give
+
+- **No guarantee survives the correction.** The Lyapunov argument of 7.3 and the region of
+  attraction of 7.2 hold for the base alone. Any added voltage breaks them. For a bounded
+  correction one could argue robustness: the LQR tolerates a bounded input disturbance, and a
+  $\pm 2$ V bound could be checked against its region of attraction (input-to-state
+  stability). That is not computed here, and for $\pm 8$ V there is nothing left to argue.
+- **Exploration is not safer.** The residual agents had the arm beyond $45^\circ$ for 28% to 63%
+  of their training time, as many as the agents from scratch: the base does not keep a
+  learning agent within limits. That remains the job of the filter of 8.2.
+- **The tests stay within training.** The payload agents trained on 0 to 50 g; 50 g is the edge
+  of what they saw, not a payload they generalize to. With 100 g nothing swings up, and 8.3
+  showed that even the exact model cannot within $\pm 8$ V.
+
+### What we learned
+
+- **A base controller is a strong prior for learning.** It halves the training time on the
+  identified model, makes learning on changing pendulums reliable, and keeps the voltage
+  calmer than learning from scratch.
+- **The size of the correction decides what the result is.** A large one replaces the base and
+  ends up as a slightly better agent from scratch; a small one keeps the base's character and
+  repairs its weak spots: with at most 2 V, a payload and a delay that defeat the base are no
+  longer a problem.
+- **A large correction starts by doing harm.** Untrained, it disturbs a working controller;
+  bounding it, or letting it grow during training, avoids that.
+- **Learning on top of a classical controller is still learning.** No guarantee carries over
+  unless it is designed in, for example by bounding the correction and proving the base robust
+  to that bound, or by placing the safety filter of 8.2 behind the sum.
+
+## 8.5 Certifying a learned controller
+
+Every learned controller so far was judged by tests: a swing-up, 120 pushes, a payload, a
+delay. Tests show what a controller does from the starts that were tried, and nothing about
+the others. This section asks what more can be said about a network, and how much it costs.
+
+The test case is the constrained MPC of 7.6. It solves a quadratic program every 10 ms, which
+takes $1.10$ ms here. A small network that copies it answers in $6.2$ µs, **178 times faster**,
+and that is why MPCs are distilled into networks on embedded computers (an underwater vehicle's
+among them). But the copy is only a fit: between and beyond its training points it may do
+anything, and the MPC's guarantees (recursive feasibility, stability, limits met) do not carry
+over. The code is in `src/pendulum_lab/furuta_distill.py`;
+the numbers come from `scripts/evaluate_distill.py`.
+
+### Copying the MPC
+
+The network maps the deviation from upright to the voltage, with two hidden layers of 64 tanh
+units. It is trained in two ways:
+
+- **Behaviour cloning:** 8000 random deviations (arm up to $12^\circ$, tilt up to $20^\circ$,
+  arm rate up to $2\ \text{rad/s}$, tilt rate up to $4\ \text{rad/s}$), each labelled with the MPC's voltage, and a least
+  squares fit.
+- **DAgger** (Ross, Gordon and Bagnell, 2011): the copy is run on the identified model from 60
+  of these starts for 3 s, the MPC labels every state the copy decided in, those states are
+  added to the data, and the network is fitted again; five rounds. A copy makes small errors,
+  and these take it to states the MPC itself never visits, where cloning has no data. DAgger
+  collects exactly those.
+
+The test is the real pendulum (dry friction, 10 ms updates held for five samples), from random
+starts where the MPC's limits can be met at all, an exact linear program decides that. None of
+these starts is in the training data. A run **fails** if the pendulum does not balance within
+3 s, or if the arm passes $13^\circ$, one degree beyond the MPC's limit.
+
+<Figure src="/media/pendulum-lab/distill_rounds.png" width={100} alt="Two panels against the training round, from 0 (behaviour cloning, 8 thousand states) to 5 (98 thousand states). Left: the share of 300 feasible starts that fail on the real pendulum; the plain network falls from 10.7 percent to 4.0, with a bump to 8.7 in round 2; the gated network falls from 15.7 to 4.0; the MPC itself fails 3.7 percent, a dashed line. Right: the RMS difference from the MPC's voltage on held-out random states rises from 0.48 to about 1 volt for the plain network, and from 0.56 to 0.74 for the gated one">
+
+Per training round, both families of networks: the share of 300 feasible starts that fail on
+the real pendulum (left), and how closely the network matches the MPC on held-out states
+(right)
+
+</Figure>
+
+Cloning alone fails from 10.7% of the starts; after five rounds of DAgger, 4.0%, against
+3.7% for the MPC itself. The MPC is not perfect on the real pendulum either: its arm reaches up
+to $16^\circ$ (the softened limit of 7.6).
+
+The right panel holds the lesson of DAgger: **the copy that drives better matches worse.** On
+random held-out states, the RMS difference from the MPC grows from $0.48$ V after cloning to
+$0.98$ V after five rounds. The network spends its capacity on the states it actually visits,
+and gives up accuracy on random ones it never reaches. Imitation error is not the measure of an
+imitating controller; the closed loop is.
+
+### A statistical guarantee
+
+The first certificate is a number with a confidence. Run the controller from $n$ independent
+random starts and count $k$ failures; the **Clopper–Pearson** bound gives the largest failure
+probability still consistent with that count at 95% confidence. With $k = 0$ it is
+$1 - \sqrt[n]{0.05}$, about $\tfrac{3}{n}$. This is the
+validation step that Hertneck, Köhler, Trimpe and Allgöwer (2018) proposed for MPCs learned
+by networks (with Hoeffding's inequality; Clopper–Pearson is the exact bound for a count). Here, 2000 feasible starts on the real pendulum:
+
+<Figure src="/media/pendulum-lab/distill_certificate.png" width={100} alt="Left: bars of the upper bound on the probability of failure from a random feasible start, at 95 percent confidence: the cloned network below 12.6 percent with 228 failures in 2000; the DAgger network below 5.2 percent with 87; the gated network below 5.5 percent with 93; the MPC itself below 4.4 percent with 73. Right, on a log scale: the error bound that interval propagation proves on the LQR's level set, for 10 to the fourth up to 30 to the fourth cells; the cloned network from 50 down to 27 volts, the DAgger network from 90 down to 59 volts; the largest error actually found inside the set, 1.7 to 1.9 volts for the cloned network and 2.9 to 4.1 for the DAgger network; and what a proof needs, 0.11 volts, far below all of them">
+
+Left: the statistical guarantee from 2000 random feasible starts on the real pendulum. Right:
+the proof attempt near upright: the error bound that is proven, the largest error found, and
+what a proof needs
+
+</Figure>
+
+| controller | failures in 2000 | failure probability, at most (95% confidence) |
+|---|---|---|
+| cloned network | 228 | 12.6% |
+| DAgger network | 87 | 5.2% |
+| gated network (below) | 93 | 5.5% |
+| the MPC itself | 73 | 4.4% |
+
+This is a real guarantee, and a cheap one: it needs only runs, for any controller, network or
+not. But it says exactly what it says. It is a statement about the **distribution** of starts
+(feasible, uniform in the box), not about any particular start; it holds for the pendulum the
+runs were made on, not for a payload or a push; and it is only as good as the simulation, if
+the runs are simulated. A rare failure mode of probability $10^{-4}$ needs tens of thousands of
+runs to show up at all.
+
+### A proof, attempted
+
+Can something be **proven** about the network everywhere, not only at sampled starts? Not over
+the whole box, but near upright there is a foothold. The MPC of 7.6 ends its plans in the
+terminal set, where the LQR meets every limit forever; on a level set of the LQR's Lyapunov
+function inside it, the MPC's optimum *is* the LQR. The largest such set is
+
+$$
+\mathcal E = \lbrace \mathbf e : \mathbf e^\top P \thinspace \mathbf e \le c \rbrace, \qquad c = 4.64,
+$$
+
+with tilts up to $5.19^\circ$ and the arm up to $12^\circ$. If the network differs from the LQR
+by at most $\delta$ volts on $\mathcal E$, the linearized loop is
+$\mathbf e_{k+1} = (A_d - B_d K) \thinspace \mathbf e_k + B_d w_k$ with $\lvert w_k \rvert \le \delta$,
+and with $\sqrt{V} = \lVert P^{\tfrac{1}{2}} \mathbf e \rVert$,
+
+$$
+\sqrt{V(\mathbf e_{k+1})} \le \rho \thinspace \sqrt{V(\mathbf e_k)} + \beta \thinspace \delta,
+\qquad \rho = 0.9889, \quad \beta = 0.217.
+$$
+
+$\mathcal E$ is never left, and every limit holds forever, as soon as
+$\beta \thinspace \delta \le (1 - \rho) \sqrt{c}$: **a proof needs $\delta \le 0.11$ V.** The
+bound on $\delta$ itself comes from **interval bound propagation**: the set is covered with
+small boxes, and a box of inputs is pushed through the network layer by layer (an affine layer
+maps a box's centre and radius exactly, and tanh is increasing), which bounds the output over
+the whole box, not only at sampled points. A test checks the bounds against 20 random points in
+each of 50 boxes.
+
+| network | cells | proven $\delta$ | largest error found | needed |
+|---|---|---|---|---|
+| cloned | $10^4$ | 50.1 V | 1.75 V | 0.11 V |
+| cloned | $30^4$ | 26.6 V | 1.89 V | 0.11 V |
+| DAgger | $10^4$ | 90.4 V | 2.93 V | 0.11 V |
+| DAgger | $30^4$ | 58.9 V | 4.13 V | 0.11 V |
+
+**No certificate.** The proven bounds are loose (interval propagation ignores how the inputs of
+a layer are correlated), and refining from $10^4$ to $30^4$ cells, half a million boxes,
+tightens them only slowly. But that is not the real obstacle: the errors actually found inside
+the set are already $1.7$ to $4.1$ V, 16 to 38 times what the proof needs (finer cells check more points and
+mostly find larger errors). DAgger's network strays further from the LQR
+than the cloned one, as on random states. The network is not the LQR near upright, and no tighter verifier can prove that it is. A network fitted to 98 000
+states with an RMS error near 1 V cannot be expected to be accurate to $0.1$ V over a whole
+region.
+Tighter verifiers exist (linear relaxations such as CROWN, mixed-integer programs for ReLU
+networks), and so do proofs that allow a larger error by using a robust invariant set; they
+would shrink the gap, not close it.
+
+### Certified by construction
+
+If the network cannot be proven close to the LQR, it can be **built** to be the LQR where that
+matters. The **gated network** is the LQR plus a learned correction that a gate switches off
+near upright:
+
+$$
+u(\mathbf e) = -K \mathbf e + g\left(V(\mathbf e)\right) r_\phi(\mathbf e), \qquad
+g = \mathrm{clip}\left(\tfrac{V - c}{c}, 0, 1\right).
+$$
+
+The correction $r_\phi$ is trained, by the same cloning and DAgger, on what the MPC adds to the
+LQR. Inside $\mathcal E$ the gate is zero, so the network **is** the LQR, whatever its weights:
+$\mathcal E$ is invariant on the linearized model and every limit holds there, exactly the
+property the MPC has. At the 56 test starts that fall inside $\mathcal E$, the difference is
+exactly $0$ V. Beyond $2c$ the correction acts fully.
+
+<Figure src="/media/pendulum-lab/distill_gate.png" width={100} alt="Top: the voltage along the tilt from minus 20 to 20 degrees, with the arm and the rates at zero. The MPC saturates at plus 10 volts below minus 8 degrees and at minus 10 above 8, with small wiggles in between; the LQR is a straight line through zero; the plain DAgger network follows the MPC smoothly, but saturates earlier on the positive side, from about 5 degrees; the gated network equals the LQR in a shaded band from minus 2.5 to 2.5 degrees and follows the MPC outside. Bottom: the gate, zero in the band, rising to one at about 3.75 degrees">
+
+A slice through the controllers along the tilt (arm and rates at zero): the MPC, the LQR and
+both networks, as applied (clipped to $\pm 10$ V); below, the gate. In the shaded band, the
+gated network is exactly the LQR
+
+</Figure>
+
+The price is small: after five rounds the gated network fails from 4.0% of the 300 starts, as
+the plain one, and 93 times in 2000 against 87 (upper bounds 5.5% and 5.2%). Its cloning round
+is worse (15.7% against 10.7%); DAgger closes the gap. The certificate is honest about its
+reach: it covers the small set where the MPC was the LQR anyway, the easy part. Everywhere
+else, the guarantee is the statistical one.
+
+### Local stability, for any policy
+
+One question has a cheap, exact answer for every controller of this chapter: is upright a
+locally stable equilibrium? Linearize the closed loop at upright, with the policy's gain taken
+by finite differences, and look at the eigenvalues (Lyapunov's indirect method):
+
+| controller at upright | largest eigenvalue magnitude | locally |
+|---|---|---|
+| LQR | $0.9641$ | stable |
+| DAgger network | $0.9663$ | stable |
+| gated network | $0.9641$ (it is the LQR there) | stable |
+| SAC agent of 8.1 (round 1, seed 0) | $1.0015$ | **unstable** |
+
+The distilled networks inherit the LQR's local stability; the SAC agent does not. Its
+linearized loop has an eigenvalue just outside the unit circle: nothing in its reward asked
+for convergence to exactly upright. Whatever keeps it up in the tests of 8.1, it is not a
+stable linearization. The test cannot tell how far a stable linearization reaches, and it says nothing about a
+policy that switches or saturates at upright; but it is a check every learned controller
+should pass before anything else.
+
+### What we learned
+
+- **Distillation works, and DAgger is what makes it work.** A 64 by 64 network is 178 times
+  faster than the QP and, after five rounds of DAgger, fails about as often as the MPC itself
+  (4.0% against 3.7% of 300 starts); copying alone fails almost three times as often.
+- **The closed loop, not the imitation error, is the measure.** DAgger's networks match the
+  MPC worse on random states and drive better.
+- **A statistical guarantee is cheap and honest about what it covers:** a failure probability
+  below 5.2% at 95% confidence, for random feasible starts on this pendulum. Nothing about any
+  particular start, or another pendulum.
+- **A proof that a generic network is close to the controller it copies is out of reach.** It
+  needs an error below $0.11$ V; the errors found are 16 to 38 times larger, and the proven bounds
+  hundreds of times.
+- **Guarantees are easier to design in than to verify afterwards.** A gate that hands control
+  to the LQR near upright gives an exact certificate there at almost no cost in performance,
+  the same lesson as the bounded correction of 8.4 and the filter of 8.2.
+
+## 8.6 Learning to tune
+
+Every controller of chapter 7 has a few numbers someone had to choose: Bryson's maxima for the
+LQR, the EKF's process noise, the swing-up's gain and energy target. They were chosen once, on
+the model, by rules of thumb. When the pendulum changes, the obvious fix is to choose again, by
+**experiment**: try a setting, measure how well it does, try another. That is what engineers
+do by hand. Done by an algorithm, it is learning, of the smallest kind: a handful of parameters
+of a controller whose structure stays fixed.
+
+On hardware every experiment costs time and wear, and some end with the pendulum on the floor.
+**Bayesian optimization** (Snoek, Larochelle and Adams, 2012; for controllers, Marco and
+colleagues, 2016, and Berkenkamp, Schoellig and Krause, 2016) makes each one count. It keeps a
+Gaussian process model of the cost over all the experiments so far, a guess with error bars,
+and runs the next experiment where the **expected improvement** over the best cost measured is
+largest: where the model predicts a low cost, or does not know. The code is in
+`src/pendulum_lab/tuning.py`, written out in NumPy and SciPy (a
+Matern 5/2 covariance with one length scale per parameter, fitted by maximum likelihood); the
+numbers come from `scripts/evaluate_tuning.py`. A test checks
+that it finds the minimum of a standard test function (Branin) within $0.05$ in 30 evaluations,
+and better than random search.
+
+### Two problems
+
+The pendulum carries a **50 g payload** at its tip, unknown to every model: the change that
+defeated almost every controller in 8.1 and 8.4. Two controllers are retuned on it:
+
+- **Balancing:** the LQG of 7.2, behind the encoders and the EKF. Five parameters: Bryson's four
+  maxima (arm, tilt, and their rates) and the EKF's process noise $q$, each on a logarithmic
+  scale over a range of a factor 40 to 10 000 around the hand design. An experiment: released
+  1 to $3^\circ$ from upright, pushed by 1 to $3\ \text{rad/s}$ at 1 s and back at 3 s, 5 s in
+  all. If the pendulum tilts past $30^\circ$, it is caught by hand and the experiment counts as
+  a failure.
+- **Swinging up:** the energy swing-up of 7.3 with the LQR hand-over. Five parameters: the
+  energy gain, the acceleration limit, the arm's stiffness and damping, and the energy target
+  (0.8 to 1.6 times the model's upright energy). An experiment: 10 s from rest; it succeeds if
+  the pendulum ends up balanced.
+
+The cost is the stage cost of the NMPC of 7.7 summed every 10 ms, the cost the agents of 8.1
+learned on; a balancing experiment that ends with the pendulum caught costs as much as
+hanging still. The tuners see its logarithm. No
+two experiments are alike: the start, the pushes' sizes and directions are random, as on
+hardware. Each tuning has a budget of **50 experiments** and starts with the hand design;
+Bayesian optimization and random search run 10 tunings each (Bayesian optimization's first
+five experiments are random too, the same as random search's), and every result is re-tested
+in 50 fresh experiments.
+
+### Balancing: better than knowing the payload
+
+<Figure src="/media/pendulum-lab/tune_progress.png" width={100} alt="Two panels of the lowest cost measured so far against the number of experiments, log scale, median and quartiles of 10 tunings. Left, balancing: both tuners drop from the hand design's cost of about 435 to about 10 within 3 experiments; Bayesian optimization goes on to about 3.7 after 20 experiments and 3.1 after 50, random search to 5.4 and 4.9; the hand weights with the payload known re-test at 11.3. Right, swinging up: from the hand design's 905, both fall to about 300 to 600; random search ends at 315, Bayesian optimization at 359, with wide quartiles">
+
+The lowest cost measured so far, against the number of experiments, on the pendulum with the
+50 g payload: median and quartiles of 10 tunings per method
+
+</Figure>
+
+The hand design balances the payload in only 14% of the re-tests: behind an EKF that assumes no
+payload, a single push of $2\ \text{rad/s}$ already throws it. With the payload known, model
+and EKF included, the same weights succeed every time, at a cost of $11.3$. Both tuners beat the hand design within three
+experiments: a weight setting that does not fall is easy to find.
+
+After 50 experiments, Bayesian optimization's best settings re-test at a cost of $8.2$ (median of
+10 tunings) and balance in 84% to 100% of the re-tests: **better than the hand weights with
+the payload known**. The
+tuning did not find the payload; it found weights that the hand design never had, for the cost
+that is actually measured. Bryson's rule weights what one would accept, not the stage cost of
+7.7, and the model-based design is optimal only for its own weights. The tuned settings are
+better without the payload too ($3.3$ against $5.1$), and at 20 g ($6.6$ against $17.8$).
+
+<Figure src="/media/pendulum-lab/tune_retest.png" width={100} alt="Two grids of re-test results, rows for the designs, columns for payloads of 50, 20 and 0 grams; each cell gives the median mean cost and the range of success rates. Balancing: the hand design costs 435 and succeeds 14 percent at 50 grams, 17.8 and 5.1 with full success at 20 and 0; the hand weights with the payload known cost 11.3, 9.6 and 5.1; Bayesian optimization's best measured costs 8.2, 6.6 and 3.3 and succeeds 84 to 100 percent at 50 grams; its best predicted 8.1, 6.6 and 3.4, always 100 percent; random search 10.3, 8.0 and 4.1, with 16 to 100 percent at 50 grams and 76 to 100 at 20. Swinging up: the hand design never succeeds at 50 or 20 grams and always without a payload; the tuned designs succeed 14 to 100, 50 to 100 and 74 to 100 percent at 50 grams, and mostly fail at 20 grams and without a payload">
+
+Every design re-tested in 50 fresh experiments, with the payload it was tuned for and without:
+the median over the 10 tunings of the mean cost, and the range of success rates
+
+</Figure>
+
+Random search finds good settings too, but less reliably: its worst tuning re-tests at 16%
+success with the payload, its median at a cost of $10.3$. And on the way it **drops the
+pendulum more**: 21 to 32 of its 50 experiments fail, against 7 to 15 for Bayesian
+optimization. With a model of the cost, fewer experiments go where failure is likely.
+
+### Noise and the best measurement
+
+The same weights do not give the same cost twice: the hand design without a payload costs
+between $2.0$ and $8.5$ in its 50 re-tests, depending on the pushes. The best cost measured in a
+tuning is therefore partly luck. Bayesian optimization's best measurements have a median of
+$3.1$; re-tested, the same settings cost $8.2$. The fix is to trust the model over the luckiest
+experiment: take the experiment the final Gaussian process **predicts** to be best. It costs the
+same ($8.1$), and every one of the 10 succeeds every time, where the luckiest measurement
+included a setting that failed one re-test in six.
+
+<Figure src="/media/pendulum-lab/tune_slice.png" width={100} alt="Three maps over the arm maximum, 3 to 180 degrees, and the tilt maximum, 0.5 to 20 degrees, both log scale, coloured by the cost of a balancing experiment from 3 to 500. Left, measured on a grid: everything above a diagonal fails, including the hand design at 30 and 5 degrees, marked with a star; the cost falls toward low tilt maxima, lowest at the bottom edge near 16 degrees of arm. Middle, the Gaussian process after 10 experiments: vertical bands, low on the right. Right, after 25 experiments: a low valley near 10 to 20 degrees of arm and another near 80, both at the bottom edge where most experiments cluster; elsewhere the model does not resemble the measured map">
+
+The balancing problem on a slice (the arm and tilt maxima; the rest as the hand design, marked
+by the star). Left: the cost measured on a grid of 625 points, 5 experiments each. Middle and
+right: Bayesian optimization's model of it after 10 and 25 experiments, and the experiments
+
+</Figure>
+
+The slice shows what the model is for. After 25 experiments it looks nothing like the measured
+map almost everywhere; but it is right about where the cost is low, and 14 of the 25 experiments
+went there. Bayesian optimization does not learn the landscape. It learns where to look.
+
+The slice also shows a limit of the setup: the best settings lie on the **edge of the search
+box**, at the smallest tilt maximum allowed. In the five-parameter tunings, 9 of 10 best settings
+sit on the smallest arm-rate maximum and 7 of 10 on the largest EKF noise. The optimum is
+probably outside the box; the box was a guess too, and a second round with a larger one is the
+obvious next step.
+
+### Swinging up: no better than chance
+
+The swing-up is a different problem. Whether it ends upright depends on the timing of a few
+swings and of the hand-over, and small changes flip it: the cost does not vary smoothly with the
+parameters but jumps between islands of success. The Gaussian process assumes the opposite, and
+it shows. After 50 experiments, Bayesian optimization's best settings re-test at a median cost
+of $506$ with 14% to 100% success on the payload, random search's at $358$ with 74% to 100%. Most
+experiments fail for both (a median of 35 of 50 for Bayesian optimization, 41 for random
+search). Taking the predicted best helps here too (50% to 100% success), but not enough.
+
+Both tuners find swing-ups that work with the payload, where the hand design never does. They
+are not the same controller anymore: 7 of 10 of Bayesian optimization's settings raise the
+energy target to its limit of 1.6, and 6 of 10 the acceleration to its limit. Without the
+payload they mostly **fail** (0% to 40% success; random search's 0% to 100%), and at 20 g
+too: the energy target now fits the heavier pendulum. Tuning on experiments fits the controller to the pendulum it was tuned on, and only
+to that one. The physical fix, an energy target that follows an estimate of the payload (7.5),
+would generalize; a number tuned for 50 g cannot.
+
+8.4 learned a correction to the same swing-up on random payloads of 0 to 50 g, in 300 000 steps
+of 10 ms: about 3000 s of pendulum time. Fifty swing-ups take 500 s. The tuning is six times
+cheaper, and gets a controller for one payload; the residual agents work for all of them. Few
+parameters learn fast, and learn little.
+
+### What we learned
+
+- **Tuning by experiment finds what the model cannot.** Fifty balancing experiments on a
+  pendulum with an unknown payload give weights that beat the hand design with the payload
+  known: they optimize the cost actually measured, not the weights of a rule of thumb.
+- **A model of the cost saves experiments and falls.** On the smooth balancing problem, Bayesian
+  optimization finds better and more reliable settings than random search, and drops the
+  pendulum about three times less often while doing it.
+- **The best measurement is optimistic.** In noisy experiments, trust the model's prediction
+  over the luckiest run, and re-test before deploying.
+- **The method's assumptions matter.** On the swing-up, whose cost jumps with small changes,
+  Bayesian optimization is no better than random search. Smoothness is an assumption about the
+  problem, not a property of the algorithm.
+- **Tuning fits the pendulum at hand.** Settings tuned for 50 g fail without the payload. Safe
+  tuning, which never tries a setting the model is not confident about (SafeOpt, Berkenkamp and
+  colleagues), and tuning over a range of conditions are the next steps; neither is done here.
+
+## 8.7 From the pendulum to underwater manipulation
+
+The Furuta pendulum was never the goal. It is a system small enough to simulate in
+milliseconds, identify to a fraction of a percent and test thousands of times, and still hard
+in the ways that matter: underactuated, nonlinear, limited in its input, constrained in its
+state, and different from its model. This section maps what the report did onto an underwater
+vehicle-manipulator system, an underwater vehicle carrying a robot arm, and says what carries
+over and what does not. It adds no experiments; every number quoted comes from an earlier
+section.
+
+### The same problem, larger
+
+| on the pendulum | on an underwater manipulator | where in this report |
+|---|---|---|
+| the arm drives the pendulum through their coupling | the arm and the vehicle move each other: a floating base | 6.1, 7.1 |
+| a Lagrangian model with four parameters | the same form (Fossen's models) with added mass, drag, buoyancy, thruster dynamics: many more parameters, known worse | 6.1, 6.4 |
+| dry friction the model did not have | hydrodynamic effects that vary with speed and configuration | 6.5, 8.3 |
+| a 50 g payload at the tip | a grasped object: mass, buoyancy and drag change at once | 7.5, 8.1 to 8.6 |
+| pushes on the pendulum | currents, waves, contact forces | 7.4, 8.1 |
+| the arm limit, $12^\circ$ or $45^\circ$ | joint limits, a tether, the clearance to a structure | 7.6, 7.8, 8.2 |
+| $\pm 10$ V at the motor | thruster and joint torque saturation | everywhere |
+| two encoders at $500\ \text{Hz}$ and an EKF | inertial sensors, Doppler velocity, acoustic positioning and cameras: slower, noisier, with dropouts | 5, 6.6 |
+| a simulated "real" pendulum | the sea: experiments cost vessel time, and the gap to simulation is large | 8.1 |
+
+The table is the argument of the report in one place: every row on the left was studied here
+on a system where the truth is known, so that each method's failure could be traced to its
+cause.
+
+### What carries over
+
+- **Learning from scratch (8.1)** is possible only in simulation, and the simulation is the
+  weak point underwater. The two failures of 8.1 transfer directly: an agent ignores what its
+  reward weighs lightly (the arm drifted in 18 of 20 agents), and a payload outside training
+  defeats it. Randomizing the model removed the chattering of nominal agents, which on a
+  thruster means wear.
+- **Safe exploration (8.2)** is a precondition, not an option. Unprotected agents spent 31% to
+  65% of their training beyond the limit; with a filter in the loop they crossed it by at most
+  $0.09^\circ$. The filter's own failure, when it needs more voltage than there is, is the
+  failure of a thruster saturated by a current.
+- **Learning inside an MPC (8.3)** favours physics: re-identifying a few parameters of a known
+  structure beat a network that extrapolated where the controller went next. Hydrodynamic
+  coefficients are such a structure; a learned term belongs only on what is left, only where
+  there are data.
+- **A learned correction on a classical controller (8.4)** fits how underwater vehicles are
+  already controlled, by well-understood feedback laws: a correction of at most 2 V repaired a
+  payload and a delay that defeated the base. Its guarantees are gone unless they are designed
+  back in.
+- **Distillation and certification (8.5)** answer the embedded computer's problem: a network
+  178 times faster than the QP, with a statistical failure bound from simulation, and an exact
+  guarantee where it is built in (the gated network). A proof about a generic network was out
+  of reach on four states.
+- **Tuning by experiment (8.6)** fits scarce vessel time: 50 experiments retuned a balancing
+  controller for a payload better than the model with the payload known. It fitted that
+  payload only, and failed on a cost that jumps.
+
+### What does not
+
+- **Dimension.** The pendulum has 4 states and 1 input; a vehicle with a six-joint arm has
+  24 states and about a dozen inputs. Methods that cover the state space break first: the proof of
+  8.5 checked up to $30^4$ boxes, and the same grid in 24 dimensions has $30^{24}$. Bayesian
+  optimization is usually used with a handful to a few dozen parameters, and the region-of-
+  attraction samples of 7.2 thin out just as fast.
+- **The gap to reality.** Here the "real" pendulum differs from its model by known dry friction
+  and nothing else, and the identified model matched it to $0.16$%. Most of what 8.1 called the
+  sim-to-real gap was a payload. Underwater the gap is the main problem, and no number in this
+  report measures it.
+- **Contact.** The pendulum never touches anything. Grasping, pushing and tool use add contact
+  forces, switching dynamics and a coupling to an environment that is not modelled at all.
+- **Perception and communication.** The controllers here saw clean angles 500 times a second.
+  Underwater, the state comes from slow, noisy acoustic and visual sensing, and an operator is
+  reachable only through a tether or a low-bandwidth acoustic link: autonomy is required, not
+  optional.
+
+### Foundation models
+
+Large models pretrained on robot data and the web, vision-language-action models such as RT-2
+(Brohan and colleagues, 2023) and OpenVLA (Kim and colleagues, 2024), and diffusion policies
+(Chi and colleagues, 2023), are the most visible kind of learning in manipulation today. They
+were left out of this report on purpose. They work at the level of tasks, turning an
+instruction and camera images into motions, not at the $500\ \text{Hz}$ of stabilization; they need data
+that hardly exists underwater; and nothing about them is checkable on a four-state pendulum. The
+report's conclusions still apply to them: a learned policy at any level needs a layer under it
+that enforces limits (8.2), a statistical account of how often it fails (8.5), and a classical
+controller to fall back on where guarantees are needed (8.4 and 8.5).
+
+## Chapter summary
+
+The [controller gallery](/projects/pendulum-lab/controller-gallery/) shows the learned controllers of this chapter next to
+those of chapter 7, on the same pendulum.
+
+The chapter let learning into the loop of chapter 7, in six ways, always trained or tuned on
+the model or in experiments, and tested on the real pendulum:
+
+| | method | what it showed |
+|---|---|---|
+| 8.1 | reinforcement learning from scratch | fast, strong swing-ups and balance; the agent ignores what the reward weighs lightly; a payload defeats it |
+| 8.2 | safe reinforcement learning | a filter in training makes learning safe at little cost; added only at deployment, it breaks the policy |
+| 8.3 | learning-enhanced MPC | re-identified physics wins; a learned residual fails by extrapolation and noise; caution makes it harmless, not useful |
+| 8.4 | residual reinforcement learning | twice as fast as from scratch; a small correction repairs the base's weak spots; no guarantee survives |
+| 8.5 | certifying a learned controller | distillation by DAgger matches the MPC; statistical bounds are cheap; a proof needs the guarantee built in |
+| 8.6 | learning to tune | 50 experiments beat the model-based design on the cost that matters; only on smooth problems, only for the conditions tuned |
+
+Three threads run through it:
+
+- **Learning optimizes what it is given, and only that.** The reward of 8.1, the training data
+  of 8.3, the imitation loss of 8.5 and the cost of 8.6 all said less than intended, and in each
+  case the learner found the gap: a drifting arm, a wild extrapolation, a copy that matched
+  worse and drove better, settings that fit one payload.
+- **Structure makes learning cheaper and safer.** Learning the parameters of a known model
+  (8.3), a correction on a working controller (8.4), a network that is the LQR near upright
+  (8.5) and a few weights of a fixed controller (8.6) each learned faster, from less data, or
+  with a guarantee left over, than learning everything.
+- **Guarantees are designed in, not found afterwards.** Analysing a trained policy recovered
+  statistics and local stability (8.5), never a guarantee over a region of states. Every such
+  guarantee that held was part of the design: a filter in the loop (8.2), a gate to the LQR
+  (8.5).
+
+Together with chapter 7, the report ends where its title points: control that comes with
+arguments, learning that comes with numbers, and the combination of the two, tested on a
+pendulum before it is trusted on anything more expensive.
+
+**Back to the [report index](/projects/pendulum-lab/).**

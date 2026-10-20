@@ -1,0 +1,917 @@
+---
+project: pendulum-lab
+number: 9
+title: "An underwater manipulator"
+summary: "The whole programme on a harder system: a thruster-driven underwater manipulator, its model and identification, model-based control, safety, learning, and what scaled and what did not."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapters 7 and 8 built and tested controllers on a pendulum small enough to know completely.
+Section 8.7 then listed what such a system cannot show: more dimensions, hydrodynamics that no
+model gets right, a body that floats, and a model far from the truth. This chapter tests those
+predictions on a simulated **underwater vehicle-manipulator system**: a small research vehicle
+carrying a robot arm, in the vertical plane. It reruns the methods of chapters 7 and 8 that
+worked, and asks which of their conclusions survive.
+
+The code is in `src/pendulum_lab/uvms.py`; the numbers come
+from `scripts/evaluate_uvms.py`.
+
+## 9.1 The model
+
+### The system
+
+The vehicle is a **BlueROV2 Heavy**, a widely used small remotely operated vehicle, with the
+parameters identified by von Benzon, Sørensen, Uth, Ouerghi, Pedersen and Liniger (2022, Table
+A1), who validated them in a test pool: 13.5 kg, 0.0134 cubic metres of displaced water, linear
+and quadratic drag in each direction, added mass, and thrusters that give at most 85 N forward,
+120 N vertically and 14 N m in pitch. It moves in **surge, heave and pitch**, the motions in the
+plane of the arm.
+
+The arm is sized like a **Reach Alpha 5**, a small commercial underwater arm (datasheet: 1.36 kg
+in air, 0.9 kg in water, 360 mm reach, 40 mm diameter, 2 kg lift). It is modelled as two
+cylinders of 15 and 20 cm, shoulder and elbow, mounted under the vehicle's bow. Two cylinders of
+that size displace 0.44 kg of water, which leaves 0.92 kg in water: the datasheet's figure. The
+link lengths are my choice, and the joint torque limits ($9$ and $5$ N m) follow from lifting
+2 kg at full reach; neither is published.
+
+<Figure src="/media/pendulum-lab/uvms_sketch.png" width={80} alt="Side view of the vehicle as a box 46 centimetres long and 38 high, with its centre of gravity in the middle, the centre of buoyancy 1 centimetre above it, a block of 1.02 litres of foam on top at the front, and the two-link arm under the bow, folded into a V when stowed and drawn dashed straight out ahead when reaching. Axes: x forward, z down, pitch theta positive nose up">
+
+The system, seen from the side: x forward, z down, pitch positive nose up; the arm stowed, and
+reaching straight out (dashed)
+
+</Figure>
+
+Five degrees of freedom and ten states, against the pendulum's two and four:
+
+$$
+\mathbf q = (x, z, \theta, q_1, q_2).
+$$
+
+### The equations
+
+Every body (the vehicle, the two links, an object in the gripper) moves with a velocity
+$\boldsymbol\nu = (u, w, r)$ in its own frame: along its axis, across it, and its pitch rate.
+In that frame its mass, **including the added mass** of the water it drags along, is a diagonal
+matrix $M_b = \mathrm{diag}(m_{11}, m_{33}, m_{55})$, and Fossen's equations for a body in
+water hold:
+
+$$
+M_b \dot{\boldsymbol\nu} + C_b(\boldsymbol\nu) \thinspace \boldsymbol\nu = \boldsymbol\tau_b,
+\qquad
+C_b(\boldsymbol\nu) \thinspace \boldsymbol\nu = \begin{bmatrix} m_{33} w r \cr {-m_{11}} u r \cr (m_{11} - m_{33}) \thinspace u w \end{bmatrix}.
+$$
+
+The last entry is the **Munk moment**: a body that is easier to move along its axis than across
+it ($m_{11} \lt m_{33}$) is turned across the flow. With
+$\boldsymbol\nu_b = J_b(\mathbf q) \thinspace \dot{\mathbf q}$ for each body, Kane's method (projecting every body's equation onto
+the coordinates) gives the equations of the whole system:
+
+$$
+M(\mathbf q) \thinspace \ddot{\mathbf q} + \mathbf c(\mathbf q, \dot{\mathbf q}) = \sum_b J_b^\top \boldsymbol\tau_b,
+\qquad
+M(\mathbf q) = \sum_b J_b^\top M_b J_b.
+$$
+
+The forces $\boldsymbol\tau_b$ are the thrusters on the vehicle, the joint torques, gravity at
+each centre of gravity, buoyancy at each centre of buoyancy, and drag on the velocity relative to
+the water: linear and quadratic for the vehicle, as identified in the paper, and a cylinder's
+cross-flow drag on strips along each link. The thrusters follow the third-order dynamics
+identified in the paper, about 0.1 s to respond. A uniform current enters through the drag only,
+a common simplification.
+
+Three tests check the equations:
+
+- **Two derivations agree.** The terms $\mathbf c$ from Kane's method equal those from Lagrange's
+  equations, derived from $M(\mathbf q)$ alone, at random states and with an object in the
+  gripper.
+- **What must be conserved, is.** Without drag, gravity and buoyancy, the joint torques are
+  internal forces: the system's momentum along $x$ and $z$ stays constant while the arm swings
+  (to $10^{-6}$, the integrator's error), and so does its energy once the torques stop.
+- **It matches the paper.** At full thrust, with the pitch held level, the vehicle reaches the
+  published top speeds of 0.72 m/s forward and 0.71 m/s down, within 0.015 m/s.
+
+One evaluation of the dynamics takes about 0.2 ms in NumPy: 9 s of motion are simulated in
+$1.6$ s, at 10 ms steps with two Runge–Kutta substeps (accurate to 0.001 mm against a ten times
+finer step).
+
+### Floating with an arm
+
+The vehicle and the arm together are 1.02 kg heavier than the water they displace. As on a real
+vehicle, foam fixes that: 1.02 litres on top, placed 23.8 cm ahead of the centre of gravity so
+that the vehicle also floats **level** with the arm stowed. The vehicle's own righting comes from
+its centre of buoyancy, only 1 cm above its centre of gravity: from the vehicle itself, a
+moment of about 1.3 N m per radian, a weak spring.
+
+That spring is what the arm pushes against.
+
+<Figure src="/media/pendulum-lab/uvms_coupling.png" width={100} alt="Left: the vehicle before and 3 seconds after the arm reaches straight out; afterwards the vehicle is pitched about 15 degrees nose down, and the arm's tip is far below the dashed line where it would be on a vehicle that did not move. Right top: pitch over 20 seconds; reaching out pitches the vehicle to minus 17 degrees and back to level after the arm returns; with the arm limp the vehicle settles 12 degrees nose up; holding a 1 kilogram object ahead it dips to minus 50 and settles at minus 39. Right bottom: depth; only with the object does the vehicle sink, steadily, more than 3 metres in 20 seconds">
+
+Thrusters off. Left: before (grey) and 3 s after the arm reaches out (blue), against where the
+tip would be on a vehicle that did not move (dashed). Right: the vehicle's pitch and depth for
+three experiments
+
+</Figure>
+
+With the thrusters off:
+
+- **The arm reaching out** pitches the vehicle by up to $17.4^\circ$, nose down, and moves it
+  7.1 cm forward and back and 2.4 cm in depth. While the arm is held out, the vehicle stays at
+  $15.3^\circ$, and the tip ends up **31 cm** from where it would be on a fixed base. The elbow
+  needs its full 5 N m on the way.
+- **The arm limp**, with its motors off, hangs straight down and trims the vehicle
+  $11.7^\circ$ nose up.
+- **Holding a 1 kg object** (0.3 litres, 0.7 kg in water) at arm's length pitches the vehicle
+  $39^\circ$ nose down and sinks it, 3.2 m in 20 s. The object's moment about the centre of
+  gravity, 3.8 N m, is within what the thrusters give (14 N m), but they have to give it.
+
+This is the coupling of the Furuta pendulum, on a larger scale: the arm moves the base it
+stands on, and a base that floats yields to every motion of the arm. On the pendulum the arm
+drove the pendulum; here the arm is driven, and the vehicle pays.
+
+### The model a designer would start with
+
+As in chapter 6, the controllers will be designed on a model and tested on the "true" system,
+here the published parameters with the thruster dynamics. The **nominal model** is what a
+designer could write down before any experiment: the same masses, geometry and added mass, but
+the drag from textbook values (a drag coefficient of 1 on the projected areas the paper gives,
+no linear term), a link drag coefficient of 1 instead of 1.2, and thrusters that respond at once.
+
+<Figure src="/media/pendulum-lab/uvms_gap.png" width={100} alt="Three panels. Left: speed under full surge thrust from 0.5 to 4.5 seconds with the pitch held level; the true system rises to 0.71 metres per second, matching the measured 0.72; the nominal model rises to 1.31. Middle: the same in heave: 0.71 against 1.08. Right: pitch under full surge thrust with the pitch left free: the true system dips to about minus 23 degrees and recovers; the nominal model pitches over continuously, past minus 700 degrees">
+
+Full thrust, the true system against the nominal model: surge and heave speeds with the pitch
+held level (left, middle), and the pitch with the pitch left free (right)
+
+</Figure>
+
+The gap is large. At the measured top speeds, textbook drag is 3.6 times too low forward
+(22.7 N instead of 83.0) and 2.3 times too low vertically, so the nominal model expects 1.31 m/s
+forward where the vehicle makes 0.71, and 1.08 m/s down instead of 0.71. The pendulum's model was
+within $0.16$% of its truth (6.5); this one is off by more than 80% in speed.
+
+The third panel shows something worse. Under full forward thrust with nothing holding the pitch,
+the true vehicle dips $23^\circ$ nose down before it recovers. The nominal model, with less drag
+to resist it, **tumbles**: the Munk moment turns it over again and again, through more than
+$500^\circ$. A model that is wrong in a coefficient is wrong in its behaviour, not only in its
+numbers, and no controller designed on it would know that its vehicle can fly straight.
+
+### What we learned
+
+- **The model has the pendulum's structure and more.** Lagrange's and Fossen's equations combine
+  into one: masses, added masses, drag, buoyancy, ten states. Two independent derivations agree,
+  and the published top speeds come out.
+- **The base yields to the arm.** Reaching out pitches the vehicle by $15^\circ$ and moves the
+  tip 31 cm; a 1 kg object tips and sinks it. Whatever controls the arm must control the
+  vehicle too.
+- **The model a designer starts with is far off.** Textbook drag is 2.3 to 3.6 times too low,
+  and it changes the qualitative behaviour: the nominal vehicle tumbles where the true one
+  does not. Identification (9.2) is not a refinement here; it is the first step.
+
+## 9.2 Thrusters and identification
+
+Section 9.1 delivered every force exactly as asked, within the paper's limits. A real vehicle
+asks eight thrusters for it, and they do not deliver it exactly. This section first gives the
+true system realistic thrusters, then identifies its hydrodynamics from experiments, as one
+would in a pool: the step before any controller is designed.
+
+### Eight thrusters
+
+The BlueROV2 Heavy has eight T200 thrusters (Table A1 of the paper). Four vertical ones push up
+when they run forward, in pairs 12 cm ahead of and behind the centre of gravity; four
+horizontal ones are vectored at $45^\circ$, 8.5 cm below the centre of gravity, and for any
+surge two of them run forward and two in reverse. Blue Robotics publishes the force of a T200
+against its PWM command, measured on a test stand from 10 to 20 V (kept in
+`data/t200`). The model uses the shape of the 16 V curve: no force at all
+between 1472 and 1528 µs, then a roughly quadratic rise, and 22% less force in reverse.
+
+The scale is the paper's: 30 N of full forward thrust per thruster gives exactly its 120 N of
+heave and 14 N m of pitch. That is less than the datasheet's 51 N at 16 V; the paper does not
+say why (an output limit of its setup is one possibility), but its drag coefficients were
+identified with these forces, so they belong together.
+
+The vehicle's software mixes the force asked for into the eight commands as if the thrusters
+were linear, as a simple mixer does, and each thruster then delivers what its curve says:
+
+<Figure src="/media/pendulum-lab/id_thrusters.png" width={100} alt="Three panels. Left: the measured force of one thruster against PWM from 1100 to 1900 microseconds, zero in a shaded dead band around 1500, rising roughly quadratically to 100 percent forward and to about minus 78 percent in reverse, against the straight line a linear mixer assumes. Middle: the force the vehicle delivers against the force asked for, in percent of full: surge is symmetric, zero for small commands and below the straight line in between; heave reaches minus 78 percent when pushing down. Right: pitch under full surge thrust with the pitch left free: with thrust as asked the vehicle dips about 23 degrees nose down and recovers; through the thrusters it pitches nose up continuously, past 700 degrees">
+
+Left: one thruster, measured, and what a linear mixer assumes. Middle: what the vehicle's
+thrusters deliver against what is asked. Right: full surge thrust with nothing holding the
+pitch, with thrust as asked (9.1) and through the thrusters
+
+</Figure>
+
+What changes:
+
+- **A dead band.** Surge commands below 5.96 N, 7% of full, deliver nothing at all: a
+  controller's small corrections, the ones that hold a position, vanish.
+- **Less force than asked.** Half the command gives 29.8 N of surge instead of 42.5.
+- **Weaker down than up.** Pushing down runs the vertical thrusters in reverse: 93 N instead
+  of 120, and a top speed down of 0.62 m/s instead of 0.71.
+- **Shared thrusters.** Heave and pitch use the same four thrusters. Asked for full heave and
+  full pitch at once, they deliver half of each (60 N and 7.2 N m); asked for full pitch alone,
+  they deliver 12.5 N m and an unasked 13 N of heave, because the pair pushing down is weaker.
+- **Surge pitches the vehicle.** The horizontal thrusters sit 8.5 cm below the centre of
+  gravity, so full surge thrust is also a 7.2 N m nose-up moment, more than five times the
+  vehicle's righting moment per radian. With nothing holding the pitch, the vehicle **somersaults**
+  (right panel). With the pitch held, the top speeds are unchanged: 0.714 m/s forward.
+
+None of this is in the nominal model, and the vehicle cannot even drive straight without
+controlling its pitch.
+
+### An identification experiment
+
+The code is in `src/pendulum_lab/uvms_id.py`. The vehicle is
+driven for 60 s by random thrust steps in surge, heave and pitch (up to 60 N, 80 N and 6 N m,
+each held 0.5 to 2 s), with a pitch stabilizer running as an autopilot's would, and the arm
+held stowed by its motors. In that minute it moves through 7 m of depth, pitches between
+$-19^\circ$ and $15^\circ$ and reaches 0.53 m/s.
+
+It is measured by the sensors such a vehicle carries, with noise typical of them (assumed
+values, not a datasheet's):
+
+| sensor | measures | every | noise |
+|---|---|---|---|
+| pressure | depth | 20 ms | 3 mm |
+| inertial unit | pitch and pitch rate | 10 ms | $0.2^\circ$, $0.005\ \text{rad/s}$ |
+| Doppler velocity log | $u$ and $w$ | 100 ms | 5 mm/s |
+| joint encoders | the arm's angles | 10 ms | 0.0005 rad |
+
+The unknowns are the nine hydrodynamic coefficients: linear and quadratic drag, and added
+mass, in surge, heave and pitch. Everything else is taken as known, as it would be: masses and
+geometry from CAD and a scale, the thrusters from the bench data, and the arm's drag from a
+textbook. That last one is deliberately wrong (a coefficient of 1 instead of 1.2), the kind of
+error that remains in any real model. Tests check that the equations hold to $10^{-9}$ on the
+true states, that the thrust rebuilt from the commands is what the simulation applied, and that
+each sensor has its rate and its noise.
+
+Two methods, as in chapters 2 and 6:
+
+- **Regression.** The equations of motion are linear in all nine coefficients. With the
+  velocities from the Doppler log smoothed and differentiated, the pitch rate likewise, and the
+  thrust rebuilt from the commands, one least squares problem gives all nine at once, in
+  about 10 s.
+- **Output error.** The model replays the recorded thrust over 2 s segments, starting from the
+  states estimated at each segment's start, and the coefficients are adjusted until its
+  predicted measurements (pitch, pitch rate, velocities, depth) match the recorded ones,
+  weighted by each sensor's noise. It starts from the regression and takes about 90 s.
+
+### What the experiments can and cannot tell
+
+<Figure src="/media/pendulum-lab/id_coefficients.png" width={100} alt="The nine coefficients, each as a percentage of its true value. The nominal model has no linear drag in surge and heave and 31 and 54 percent of the true quadratic drag. The regression is within 5 percent for the six surge and heave coefficients, but 29 percent high in linear pitch drag, 70 percent low in quadratic pitch drag and 17 percent high in pitch added mass. Output error is within 12 percent everywhere except 8 percent low in quadratic surge drag, and across three more experiments scatters by up to 15 percent, and from minus 20 to plus 63 percent in quadratic pitch drag. With the arm's drag right, output error is within 5 percent everywhere. From a gentle experiment, output error gets the added mass right but quadratic pitch drag 71 percent low">
+
+Every estimate as a percentage of the true value, with two standard errors as the fit reports
+them
+
+</Figure>
+
+| coefficient | true | nominal | regression | output error | output error, arm's drag right |
+|---|---|---|---|---|---|
+| $X_u$ in N s/m | 13.7 | 0 | 13.1 | 13.7 | 14.3 |
+| $Z_w$ in N s/m | 33.0 | 0 | 33.1 | 33.1 | 32.6 |
+| $M_q$ in N m s | 0.80 | 0.80 | 1.03 | 0.89 | 0.84 |
+| $X_{u\vert u\vert}$ in $\mathrm{N\ s^2\ m^{-2}}$ | 141 | 43.9 | 144 | 130 | 140 |
+| $Z_{w\vert w\vert}$ in $\mathrm{N\ s^2\ m^{-2}}$ | 190 | 102 | 191 | 187 | 191 |
+| $M_{q\vert q\vert}$ in $\mathrm{N\ m\ s^2}$ | 0.47 | 0.47 | 0.14 | 0.42 | 0.46 |
+| $X_{\dot u}$ in kg | 6.36 | 6.36 | 6.47 | 6.05 | 6.43 |
+| $Z_{\dot w}$ in kg | 18.7 | 18.7 | 19.0 | 17.9 | 18.7 |
+| $M_{\dot q}$ in $\mathrm{kg\ m^2}$ | 0.135 | 0.135 | 0.159 | 0.130 | 0.132 |
+
+Four things stand out.
+
+**Surge and heave are easy; pitch is not.** The regression gets the six surge and heave
+coefficients within 5%. The pitch coefficients are off by 17% to 70%: the stabilizer keeps the
+pitch rate small, so pitch drag barely acts, and the regression differentiates a noisy rate to
+get the angular acceleration. Output error, which never differentiates, brings quadratic pitch
+drag from 0.14 to 0.42 and pitch added mass to within 4%.
+
+**A wrong part of the model moves the right parts.** With the arm's drag 17% too low, output
+error puts the missing drag into the vehicle's coefficients: quadratic surge drag comes out 8%
+low, and across three more experiments 5% to 11% low; the added mass in surge and heave
+4% to 7% low. The same fit
+with the arm's drag right is within 5% everywhere. The standard errors the fit reports (0.4 to
+0.7 for quadratic surge drag) are **twenty times smaller** than its actual errors (8 to 15):
+they measure the noise, not what the model gets wrong.
+
+**How the vehicle is driven decides what can be learned.** A gentle experiment, with steps of
+at most 25 N in surge and 30 N in heave, held 3 to 6 s, barely accelerates the vehicle: the regression then gets the added
+mass 70% (surge) and 26% (heave) too low. Output error still finds it, but quadratic pitch drag,
+which needs fast pitching, comes out 71% low from the gentle run and scatters from $-20$% to
+$+63$% even across the vigorous ones. Experiment design (6.3) matters as much here as on the
+pendulum.
+
+**The fit that matches its own data best is not the best model.** On a held-out run of 30 s,
+with its own thrust steps and the arm reaching out and back:
+
+<Figure src="/media/pendulum-lab/id_validation.png" width={100} alt="Three panels over the 30 second validation run, with shaded bands where the arm moves out at 5 seconds and back at 15. Surge speed: the real vehicle and the identified model lie on top of each other; the nominal model overshoots most steps, reaching 1 metre per second where the vehicle makes 0.5. Depth: the vehicle rises 3.4 metres; the identified model follows it; the nominal model rises 5.7 metres. Pitch: the identified model follows the vehicle; the nominal model differs by up to 10 degrees, most when the arm moves">
+
+The held-out run on the real vehicle, and as the nominal and the identified models predict it,
+under the same commands and the same stabilizer
+
+</Figure>
+
+| model | RMS error in $u$ | in $w$ | in pitch | depth after 30 s |
+|---|---|---|---|---|
+| nominal | 0.234 m/s | 0.183 m/s | $4.48^\circ$ | 2.24 m off |
+| regression | 0.001 m/s | 0.001 m/s | $0.08^\circ$ | 0.01 m off |
+| output error | 0.010 m/s | 0.003 m/s | $0.05^\circ$ | 0.04 m off |
+| output error, arm's drag right | 0.001 m/s | 0.000 m/s | $0.02^\circ$ | 0.00 m off |
+
+Both identified models predict the vehicle almost perfectly, where the nominal one ends up
+2.24 m off in depth. But the regression predicts the surge **better** than output error,
+whose quadratic surge drag absorbed the arm's: on a run where the arm moves, that borrowed drag
+is in the wrong place. Only with the arm's drag right is output error best. A fit is judged on
+data it has not seen, and its residuals on its own data are not the test.
+
+### What we learned
+
+- **Real thrusters are part of the plant.** A dead band of 7%, a curved response, a weaker
+  reverse, heave and pitch that share thrusters, and a surge that somersaults the vehicle unless
+  the pitch is controlled: none of it is in a model that delivers forces as asked.
+- **A minute of experiments replaces textbook guesses.** Textbook drag was off by a factor of
+  2.3 to 3.6; one identification run brings the surge and heave coefficients within 5% and the
+  predicted motion within centimetres.
+- **The weak directions stay weak.** Pitch drag, barely excited, is the hardest to learn and
+  the most scattered, and only a method that does not differentiate noisy rates gets near it.
+- **The uncertainty a fit reports does not include the model's errors.** A 17% error in the
+  arm's drag biased the vehicle's coefficients by up to 11%, twenty times the reported
+  standard errors. Validation on held-out data, with the parts of the model that were assumed
+  exercised, is what reveals it.
+
+## 9.3 Model-based control
+
+With a model identified, the vehicle can be controlled. The code is in
+`src/pendulum_lab/uvms_control.py`.
+
+### The mission
+
+Thirty seconds next to a structure, in a current of 0.2 m/s:
+
+1. **Hold station** with the arm stowed (0 to 5 s).
+2. **Reach**: move the arm's tip to a target 30 cm ahead of and 10 cm below the shoulder, over
+   2 s (5 to 7 s), and hold it there.
+3. **Grasp**: at 15 s the gripper closes on a 1 kg object (0.3 litres, 6.9 N in water) that no
+   model knows about, and the tip must stay on target.
+
+Every controller sees the vehicle only through its sensors: those of 9.2, plus an acoustic
+position fix (a USBL, for the horizontal position) once a second with 5 cm of noise, assumed.
+
+### An autopilot, piece by piece
+
+- **A compensating mixer.** It inverts the thrusters' measured curve of 9.2, so that the force
+  asked for is the force delivered: it jumps the dead band, straightens the curve, and takes
+  out the pitch that surge thrust makes from below the centre of gravity. A test checks it
+  within half a newton over every force the thrusters can deliver.
+- **An extended Kalman filter** on the designer's model, with 14 states: the 10 of the system,
+  the current, and an unknown force at the tip, both as slow random walks. It is the
+  disturbance observer of 7.5, with two disturbances instead of one. A test checks that it
+  finds the current from the sensors.
+- **Three control laws:**
+  - **PID**, one loop per axis (surge and heave in the vehicle's frame, pitch, each joint), on
+    the estimated state, with the linear mixer: roughly what a stock autopilot does. It runs
+    at $100\ \text{Hz}$.
+  - **LQR** on the model linearized at rest at the reference, with integral action on all five
+    positions, around the forces that hold the reference against the estimated current and tip
+    force (computed per pose). It runs at $20\ \text{Hz}$.
+  - **Nonlinear MPC** by real-time iteration, as in 7.7: a plan of 2 s in 20 intervals,
+    100 decision variables, one Gauss–Newton step every 100 ms. Its cost puts the **tip** on
+    its target directly, so it may use the vehicle and the arm together, and its constraints
+    are the thrusters' true limits (surge, and each pair of vertical thrusters with its weaker
+    reverse) and the joints' torques.
+
+Getting these to work took four fixes, each a lesson about the system:
+
+- The PID's joint loops at $20\ \text{Hz}$ shook the arm apart: the arm's links are so light that a
+  sampled PD overshoots every step (the same as in 9.1). At $100\ \text{Hz}$, as an arm's own servos
+  run, it works.
+- The MPC's model needs Runge–Kutta steps of 20 ms, not 50: the light, damped joints have a
+  time constant of about 10 ms, and longer explicit steps made its plan blow up as soon as
+  the arm moved.
+- The MPC's input cost penalizes the distance from the forces that hold the system still
+  where it is, not the forces themselves; otherwise holding against the current or a load
+  costs something, and it settles off target.
+- The quadratic programs were a hundred times too slow until the solver used triangular
+  solves with its Cholesky factor: a general solve of a 100 by 100 system takes 20 ms when
+  the linear algebra library runs 16 threads, 0.03 ms when it runs one.
+
+### Results
+
+Each configuration flies the mission three times, with different sensor noise, on the true
+system. "Identified" is designed on the regression of 9.2, "nominal" on the textbook model.
+
+<Figure src="/media/pendulum-lab/ctrl_mission.png" width={100} alt="Three panels over the 30 second mission. Top, the tip's distance from its target: about 23 centimetres while stowed, falling to near 1 centimetre during the reach for the LQR and both NMPCs; the PID's tip wanders while stowed and overshoots the reach. After the grasp at 15 seconds, the LQR and the announced NMPC stay within about 2 centimetres; the PID jumps to 18 centimetres and creeps back over 10 seconds; the NMPC oscillates with growing amplitude, reaching 18 centimetres. Middle, the vehicle's distance from its station: the PID drifts 11 centimetres in the current at the start; the others stay within 2 centimetres, except the NMPC after the grasp, which drifts to 8 centimetres while oscillating. Bottom, pitch: within a degree for the LQR and the announced NMPC; the PID down to minus 6 degrees after the grasp; the NMPC oscillating between plus 4 and minus 7 degrees">
+
+The mission on the true vehicle, one flight per controller (all designed on the identified
+model)
+
+</Figure>
+
+| controller | off station | tip once reached | after the grasp: worst | at the end | back within 3 cm | largest pitch |
+|---|---|---|---|---|---|---|
+| PID, linear mixer | 10.0 to 10.6 cm | 1.5 to 2.3 cm | 17.3 to 17.9 cm | 2.0 to 3.1 cm | after 10.7 to 15 s | $6.4^\circ$ |
+| LQR | 0.2 to 0.4 cm | 0.2 to 1.4 cm | 3.2 to 4.0 cm | 0.2 to 2.1 cm | after 0.3 s | $1.4^\circ$ to $1.6^\circ$ |
+| LQR, linear mixer | 0.7 to 1.3 cm | 0.2 to 1.4 cm | 3.3 to 4.1 cm | 0.2 to 2.0 cm | after 0.3 s | $3.2^\circ$ to $3.6^\circ$ |
+| LQR, nominal model | 0.2 to 0.3 cm | 0.2 to 1.3 cm | 3.1 to 3.9 cm | 0.4 to 2.4 cm | after 0.2 to 0.3 s | $1.4^\circ$ to $1.6^\circ$ |
+| NMPC | 0.2 to 0.3 cm | 0.3 to 1.5 cm | 16.3 to 18.6 cm | 9.5 to 11.7 cm | never | $6.9^\circ$ to $7.2^\circ$ |
+| NMPC, nominal model | 0.5 to 0.6 cm | 0.3 to 1.4 cm | 16.9 to 19.5 cm | 10.3 to 12.9 cm | never | $6.4^\circ$ to $6.6^\circ$ |
+| NMPC, grasp announced | 0.2 to 0.3 cm | 0.3 to 1.5 cm | 0.9 to 2.3 cm | 0.2 to 2.1 cm | at once | $1.1^\circ$ to $1.3^\circ$ |
+
+What the table says:
+
+- **Model-based control holds station; the stock PID does not.** In the current the PID drifts
+  10 cm before its integral catches up, and it pitches $6^\circ$; the LQR and the MPC stay within
+  0.6 cm.
+- **The tip's accuracy is set by the estimate, not the controller.** Once reached, every
+  model-based controller holds the tip within 0.2 to 1.5 cm, depending on the sensor noise. The
+  MPC on the true state puts it within 0.00 cm, and on the estimated state with the true
+  disturbances within 1.44 cm: what is left is where the estimator, with an acoustic fix of
+  5 cm once a second, thinks the vehicle is.
+- **The thrusters' dead band costs a factor of two to three.** Behind the linear mixer, the LQR
+  is 0.7 to 1.3 cm off station instead of 0.2 to 0.4, and pitches twice as much: the small
+  corrections that hold a position fall into the dead band.
+- **The identified model hardly matters to the LQR.** Designed on the textbook model, it does as
+  well. Station keeping is slow, where drag matters little, and feedback with integral action
+  absorbs what the model gets wrong. In 9.2 identification mattered enormously for
+  *prediction* (2.24 m of depth after 30 s); here it does not for *control*.
+- **The grasp separates the controllers.** The LQR's tip dips by 3 to 4 cm and is back within
+  0.3 s: its integral action and the estimator's tip force take the object's weight. The PID
+  takes 11 to 15 s. The MPC never recovers.
+
+### Why the MPC fails after the grasp
+
+The MPC is the most capable of the three, and the only one that fails. To find out why, it was
+given half of the truth at a time:
+
+| the MPC gets | after the grasp: worst | at the end | estimated tip force at the end (true 6.9 N) |
+|---|---|---|---|
+| the true state and the true disturbances | 0.31 cm | 0.03 cm | (not used) |
+| the true state, the estimated disturbances | 12.7 cm | 7.75 cm | $-1.63$ N |
+| the estimated state, the true disturbances | 1.9 cm | 1.50 cm | 6.88 N |
+| the estimated state and disturbances (the real loop) | 16.3 to 18.6 cm | 9.5 to 11.7 cm | swinging (figure below) |
+
+The formulation is right, and so is the state estimate. What fails is the estimated tip force,
+and only while the MPC acts on it. Under the LQR, the same estimator settles on the object's
+weight (figure below).
+
+<Figure src="/media/pendulum-lab/ctrl_grasp.png" width={100} alt="Two panels from 14 to 30 seconds. Left, the estimator's guess of the downward force at the tip: under the LQR it jumps to about 10 newtons at the grasp and settles on the object's weight of 6.9; under the NMPC it swings between minus 5 and 17 newtons for the rest of the flight; under the NMPC told about the object it stays near zero, since its model now includes the weight. Right, the joint speed: under the LQR and the announced NMPC it stays below about 0.2 radians per second after a brief transient; under the NMPC it oscillates up to 3.5 radians per second">
+
+After the grasp: what the estimator believes about the force at the tip (left), and how fast
+the arm moves (right)
+
+</Figure>
+
+The object does not only weigh; it has mass. Held at arm's length, it makes the arm 3.0 times
+heavier to turn at the shoulder and 4.4 times at the elbow (0.17 instead of 0.06 $\mathrm{kg\ m^2}$ at the
+shoulder), and neither the estimator nor the MPC knows it. The MPC plans the arm's motion with
+the light arm's inertia, overshoots, and corrects again a tenth of a second later: the arm
+swings at $1.3\ \text{rad/s}$ (RMS) and never stops. In that swinging the estimator, whose model of the
+object is a constant force, sees forces that come and go, and its estimate swings with them,
+which the MPC then tries to cancel. The LQR suffers from the same wrong inertia, but its
+feedback is robust to it: its arm comes to rest, and once at rest, a constant force is the right
+model.
+
+Told about the object when it grasps it, its mass and volume in the estimator's and the MPC's
+model, the MPC becomes the best of all: 0.9 to 2.3 cm at worst, and the vehicle within
+$1.3^\circ$. The MPC is **certainty-equivalent**: it acts on its model and its estimates as if
+they were the truth, and does exactly what it plans. That is its strength when the model is
+right and its weakness when a grasp makes it wrong. The remedies are to estimate the object's
+mass and not only its weight (adaptation, 7.5), or to plan against the uncertainty (robust or
+tube MPC), or to keep the integral action that made the LQR robust; a slower force estimate and
+an integral term on the tip were tried and did not suffice.
+
+### Computation
+
+One MPC iteration, with 10 states, 5 inputs and 20 intervals, takes 34 ms in Python (at most
+44 ms), against the 100 ms between iterations. The pendulum's MPC of 7.7 took about 10 ms for
+75 intervals of one input. The cost grew with the problem, but stayed real-time, because the
+dynamics of all 20 intervals are evaluated at once
+(`uvms_batch.py`, checked against the model of 9.1 to
+$10^{-10}$).
+
+### What we learned
+
+- **Model-based control earns its place underwater.** Against the current, the LQR and the MPC
+  hold the vehicle within 0.6 cm where a PID per axis drifts 10 cm.
+- **The thrusters are part of the controller.** Inverting their curve cuts the station error to a
+  third and the pitch to half.
+- **For slow control, feedback forgives the model.** The textbook model controls almost as well
+  as the identified one; it is prediction, and planning far ahead, that need identification.
+- **A grasp changes the arm.** The object's mass, three to four times the arm's own inertia,
+  breaks the controller that trusts its model most, while the one with integral action rides
+  it out. Knowing the load, the planner is best.
+- **The estimate sets the floor.** No controller places the tip better than the vehicle's
+  position is known: 1 to 2 cm with an acoustic fix once a second.
+
+## 9.4 Safety
+
+Working next to a structure, the arm and the vehicle must not touch it, and the arm's joints
+must stay within their range, whatever the controller does: a well-tuned LQR, a stock PID, an
+operator's command or, in 9.5, a learning agent. Section 7.8 built a safety filter for the
+pendulum's arm; this section builds one for the vehicle and its arm. The code is in
+`src/pendulum_lab/uvms_safety.py`.
+
+### A barrier for every limit
+
+The structure is a wall 6 cm beyond the arm's target, with a margin of 2 cm. Four points must
+keep clear of it: the tip, the elbow and the vehicle's two front corners. The elbow may not fold
+beyond $155^\circ$, the shoulder must stay between $-100^\circ$ and $40^\circ$ (assumed ranges).
+Each limit is a function $h(\mathbf q)$ that must stay positive, with the two nested conditions
+of 7.8,
+
+$$
+\psi = \dot h + \lambda_1 h \ge 0,
+\qquad
+\dot\psi + \lambda_2 \thinspace \psi \ge 0,
+$$
+
+with $\lambda_1 = 2$ and $\lambda_2 = 4$ per second. The accelerations are affine in the five
+inputs, $\ddot{\mathbf q} = \mathbf a + A \thinspace \mathbf u$, so every condition is a linear
+inequality in $\mathbf u$, on the identified model with the estimated current and tip force. With
+one input, 7.8 could clip; with five, the filter solves a quadratic program: the inputs closest
+to the proposed ones (each weighted by its range) that meet all eight inequalities and the
+thrusters' true limits. Slack variables, heavily penalized, keep it solvable when no input can
+meet them, and their size reports the broken promise. A test checks that each inequality
+predicts the second derivative of its limit exactly, against the model differentiated
+numerically.
+
+The mission is that of 9.3 next to the wall, with three events and no grasp:
+
+- **a gust** at 12 s: the current toward the structure rises from 0.2 to 0.5 m/s;
+- **an unsafe command** at 22 s: the station moves 12 cm toward the structure with the arm held,
+  which would put the tip 6 cm into it;
+- **another** at 30 s: fold the elbow to $170^\circ$, past its limit.
+
+Besides the sensors of 9.3, a forward range sensor measures the distance from the vehicle's bow
+to the structure ($10\ \text{Hz}$, 1 cm, assumed: a sonar or a camera), as work next to structures needs.
+Each configuration flies three times with different sensor noise.
+
+### What the filter does, and where it stops
+
+<Figure src="/media/pendulum-lab/safe_clearance.png" width={100} alt="Two panels from 5 to 36 seconds. Top, the closest point to the structure: about 5.5 centimetres after the reach; the gust at 12 seconds brings it to about 2.5 centimetres for all; after the unsafe command at 22 seconds, without a filter it goes 8 centimetres into the structure; the filter at the LQR's 20 hertz dips to 0.3 centimetres and then hovers around the 2 centimetre margin; the filter at 100 hertz holds it at about 1.8 centimetres; the robust filter keeps 3 to 6 centimetres. When the elbow folds at 30 seconds, every line moves away from the structure. Bottom, the elbow's angle: without a filter it stays at 64 degrees while the vehicle pushes in, then folds to 174 degrees, past the 155 degree limit; with the filters it rises to about 120 degrees during the push, folding the arm away from the structure, and the 100 hertz filter stops it at 155 degrees; the robust filter keeps it near 120 degrees">
+
+The closest point to the structure (top) and the elbow (bottom), without and with the filter
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/safe_snapshot.png" width={90} alt="Two side views at 29 seconds. Left, without a filter: the vehicle has moved forward and the outstretched arm's tip is 6.4 centimetres inside the grey structure. Right, with the filter: the vehicle has moved forward as commanded, and the arm is folded into a V, its tip 2.1 centimetres short of the structure">
+
+At the end of the unsafe command: without the filter, and with it
+
+</Figure>
+
+| configuration | in the gust | pushed in | elbow folded | elbow at most | changed |
+|---|---|---|---|---|---|
+| LQR, no filter | 2.5 to 2.8 cm | **$-8.2$ to $-7.9$ cm** | $-6.5$ to $-6.2$ cm | $174.8^\circ$ | |
+| LQR, filter at the LQR's $20\ \text{Hz}$ | 2.5 to 2.8 cm | 0.3 cm | 1.4 to 1.6 cm | $158.0^\circ$ | 36% |
+| LQR, filter at $100\ \text{Hz}$ | 2.5 to 2.8 cm | 1.7 to 1.8 cm | 1.6 to 2.0 cm | $155.1^\circ$ | 37% |
+| the same, no range sensor | 3.1 to 4.1 cm | $-0.2$ to 3.2 cm | 0.0 to 3.6 cm | $155.0^\circ$ | 36 to 37% |
+| LQR, robust filter (10 N) | 3.0 to 3.2 cm | 3.2 to 3.3 cm | 5.4 to 5.8 cm | $137.6^\circ$ | 60% |
+| PID, no filter | **$-12.5$ to $-12.0$ cm** | $-14.5$ to $-14.4$ cm | $-14.5$ to $-14.3$ cm | $177.1^\circ$ | |
+| PID, filter at $100\ \text{Hz}$ | $-0.5$ to $-0.3$ cm | $-9.9$ to $-9.7$ cm | $-9.6$ to $-9.0$ cm | $139.6^\circ$ | 99% |
+| PID with the compensating mixer, no filter | $-13.5$ to $-12.9$ cm | $-10.2$ to $-10.1$ cm | $-9.3$ to $-9.1$ cm | $177.2^\circ$ | |
+| PID with the compensating mixer, filter at $100\ \text{Hz}$ | $-2.2$ to $-2.0$ cm | $-1.8$ to $-1.6$ cm | $-1.8$ to $-1.4$ cm | $137.5^\circ$ | 67 to 68% |
+| LQR, no filter, gust of 0.9 m/s | $-171$ cm | $-309$ cm | $-401$ cm | $254^\circ$ | |
+| LQR, filter at $100\ \text{Hz}$, gust of 0.9 m/s | $-125$ cm | $-168$ cm | $-210$ cm | $148.9^\circ$ | 66 to 67%, slack 1.6 |
+
+The closest any point comes to the structure in each phase (negative: through it), and how
+often the filter changed the proposal
+
+What it shows:
+
+- **With the LQR, the filter holds.** The unsafe command would put the tip 8 cm into the
+  structure; the filter stops it 1.7 to 1.8 cm short, within 3 mm of its margin, and stops the
+  elbow at its limit ($155.1^\circ$). It does so by **folding the arm**: the vehicle follows
+  the command forward, and the filter bends the elbow back, because the arm's light joints are
+  the cheapest inputs to change. Elsewhere it changes nothing that matters: the tip's accuracy
+  once reached is the same as without it (0.4 cm).
+- **It must run fast.** Run only when the LQR runs, every 50 ms, it lets the tip within 0.3 cm
+  and the elbow $3^\circ$ past its limit: the conditions hold in continuous time, and a held
+  input lets the system through between samples, as in 7.8. At every 10 ms sample it holds. A
+  safety layer runs faster than the controller it guards.
+- **It is only as good as the estimate.** Without the range sensor, with only the acoustic fix,
+  one flight in three touches the structure ($-0.2$ cm) while the filter believes it keeps its
+  margin: the filter acts on where the estimator thinks the vehicle is.
+- **It is only as good as its model of the disturbances.** Under the stock PID the vehicle sits
+  closer to the structure when the gust hits, and the estimated current lags the true one: the filter believes the push weaker than it is, and the condition $\psi \ge 0$
+  is lost before the estimate catches up. Behind the compensating mixer the PID still ends
+  2 cm inside (against 13 cm without the filter); behind the linear mixer, where the filter's
+  forces are not even the delivered ones, 10 cm. The filter assumes the thrusters deliver what
+  it asks.
+- **A robust filter pays in reach.** Asking every condition to hold for any extra force up to
+  10 N on the vehicle keeps the tip 3.2 cm away, but it also keeps the vehicle further back
+  everywhere (tip 0.7 to 0.8 cm off target instead of 0.4) and refuses even the allowed part of
+  the fold: the elbow stays near $120^\circ$ (figure). The worst case always pushes, so the
+  filter keeps a standing distance of about the worst acceleration over $\lambda_1 \lambda_2$:
+  the larger the bound, the further the vehicle stays from its work.
+- **No filter holds what the thrusters cannot.** A current of 0.9 m/s is beyond the vehicle's
+  top speed (0.72 m/s, 9.1). The filter halves how far it is carried into the structure, keeps
+  the elbow within its limit, and reports its broken promise: a slack of 1.6.
+
+### What we learned
+
+- **A barrier per limit, a quadratic program per sample.** The filter of 7.8 extends to five
+  inputs and eight limits, and keeps the tip and the joints in range under an unsafe command
+  that would otherwise push the tip 8 cm into the structure.
+- **The filter's guarantee is a statement about its model, its estimate and its rate.** Run too
+  slowly, on a biased position, against a gust its model has not yet seen, or behind thrusters
+  it does not model, it lets the system through, by millimetres or by centimetres.
+- **Robustness has a price in reach.** Covering the unknown disturbances keeps the vehicle back
+  from the work it came to do; better knowledge of the current is worth more than a bigger
+  margin.
+- **The filter decides how to be safe.** Given a vehicle and an arm, it folded the arm rather
+  than backing the vehicle off: its weights, not the task, chose. Which input should give way is
+  a design decision.
+
+## 9.5 Learning
+
+Section 9.3 ended with a diagnosis: the NMPC was the best controller when told the object's
+mass, and the worst when not, because its model was wrong after the grasp. Chapter 8 tried three
+kinds of learning on the pendulum; this section tries them on the vehicle and its arm, each where
+it fits the problem:
+
+- **learning the model** where the model is wrong: after the grasp, the object's mass and volume
+  (re-identified physics), or the accelerations the model gets wrong (a learned residual), as
+  in 8.3;
+- **learning a correction** to the controller, by reinforcement learning, bounded, as in 8.4;
+- **learning the weights** of the controller, by Bayesian optimization, as in 8.6.
+
+The code is in `src/pendulum_lab/uvms_learning.py` and
+`src/pendulum_lab/uvms_rl.py`.
+
+### Learning the object
+
+The mission is that of 9.3: reach, hold, and grasp an object of 1.0 kg and 0.3 L at 15 s. The
+gripper closing is a known event, so the learner knows when to start: it records a short window
+after the grasp, learns once, updates the models of the estimator and the NMPC, and resets the
+estimator's tip force, since the model now carries what the force stood in for. During the
+window the NMPC flies with its old model. Two learners get the same data:
+
+- **physics:** the object's mass and volume, by least squares on the pitch and the two joints,
+  which the object affects most and the sensors measure best. As output error (9.2): from the
+  measured state every 0.2 s, the model replays the recorded thrust and torques, and its angles
+  are matched to the measured ones;
+- **a residual:** a network (two layers of 64) from the pitch, joint angles, velocities, thrust
+  and torques to the accelerations the model gets wrong, added to both models.
+
+The pitch and the joints come from the inertial unit and the encoders, smoothed over 50 ms. Each
+configuration flies three times with different sensor noise.
+
+<Figure src="/media/pendulum-lab/learn_grasp.png" width={100} alt="Two panels. Left, the tip's distance from its target from 14 to 30 seconds, with the grasp at 15 seconds. Told the object, it stays below 2 centimetres. Not told, it oscillates with a growing amplitude up to 18 centimetres. With physics learned from 0.5 seconds, it follows the not-told line through the first oscillation up to 7.7 centimetres, then drops onto the told line after about 16 seconds. With physics learned from the estimator's states, it settles into a small oscillation between 3 and 6 centimetres that slowly grows. With the residual network, it leaves the plot within 2 seconds of learning and stays above 20 centimetres. Right, the mass and volume learned with each window and data source, three flights each: from the sensors, the mass lies between 0.9 and 1.1 kilograms and the volume between 0.15 and 0.4 litres, around the true 1.0 kilograms and 0.3 litres; from the estimator's states, the mass is 1.8 to 1.9 kilograms and the volume 1.2 to 1.4 litres">
+
+The tip after the grasp, by what the NMPC knows (left, one flight each), and what the physics
+learner finds (right, three flights each)
+
+</Figure>
+
+| configuration | after the grasp, at most | at the end | back within 3 cm | learned |
+|---|---|---|---|---|
+| NMPC, not told (9.3) | 16.3 to 18.6 cm | 9.5 to 11.7 cm | never | |
+| NMPC, told the object (9.3) | 0.9 to 2.3 cm | 0.2 to 2.1 cm | at once | |
+| physics, 0.5 s | 6.7 to 7.7 cm | 0.2 to 1.9 cm | after 0.8 s | 0.9 to 1.0 kg, 0.2 to 0.3 L |
+| physics, 1 s | 8.0 to 8.8 cm | 0.2 to 1.9 cm | after 1.2 to 1.3 s | 1.0 kg, 0.3 to 0.4 L |
+| physics, 2 s | 9.1 to 11.3 cm | 0.5 to 2.1 cm | after 2.3 to 2.5 s | 1.0 to 1.1 kg, 0.3 to 0.4 L |
+| physics, 1 s, encoders differentiated twice | 8.0 to 8.8 cm | 0.2 to 1.9 cm | after 1.2 to 1.3 s | 1.0 to 1.1 kg, 0.3 L |
+| physics, 1 s, from the estimator's states | 8.0 to 8.8 cm | 3.0 to 5.9 cm | never | 1.8 to 1.9 kg, 1.2 to 1.4 L |
+| residual network, 1 s | 85 to 115 cm | 48 to 57 cm | never | |
+| residual network, 2 s | 67 to 92 cm | 42 to 47 cm | never | |
+
+The tip's distance from its target after the grasp at 15 s, over three flights
+
+What it shows:
+
+- **Half a second of physics is enough.** From 0.5 s of data the learner finds the object
+  within 10% in mass, and the NMPC is back within 3 cm 0.8 s after the grasp and ends where the
+  told NMPC does. The 6.7 to 7.7 cm it reaches is the price of the window, flown with the old
+  model.
+- **A longer window buys nothing.** One or two seconds give the same mass, but the arm swings
+  further in the meantime (up to 8.8 and 11.3 cm). Two parameters need little data, and every
+  moment spent collecting it is flown with the wrong model.
+- **Learn from the sensors, not from the estimator.** The estimator's model knows nothing of the
+  object; its tip force absorbs the load, and the states it reports are consistent with its own
+  model rather than with the arm. A learner fed with them finds an object of 1.9 kg and 1.3 L,
+  almost twice too heavy and four times too large, and the NMPC never settles. The same learner
+  on the raw encoders and inertial unit finds 1.0 kg. A learner should not learn from what
+  another model has already explained away.
+- **Output error or differentiation, the same flight.** Differentiating the encoders twice
+  cannot follow commands that change in steps every sample, and finds a slightly heavier object
+  (1.0 to 1.1 kg, figure); here the difference stays within what the NMPC tolerates. Output
+  error is the safer default, not a necessity on this mission.
+- **The residual network fails, worse than knowing nothing.** Trained on one or two seconds of a
+  single trajectory, it has seen a sliver of the states and inputs the NMPC will plan over, and
+  nothing constrains it elsewhere. Within two seconds of learning the vehicle pitches up to
+  $77^\circ$ and the solver restarts its plan 33 to 88 times. The likely reading, not tested
+  here: the NMPC optimizes through the network, and is drawn to where its extrapolation is
+  wrong. It is the failure of 8.3, made sharper by an optimizer in the loop.
+
+### Learning the weights
+
+The LQR's weights in 9.3 were set by hand, as the largest tolerated deviation of each state
+(Bryson's rule). Four of them are tuned here by flying the whole mission: the vehicle's position,
+its pitch, the joints and the integral states, each between bounds (2 cm to 0.5 m, 0.02 to
+0.5 rad, 0.02 to 0.5 rad, 0.05 to 2), on a logarithmic scale. A flight's cost is the tip's RMS
+error from the reach on, grasp included, with fresh sensor noise every flight: the measurement
+is noisy, as a test in the water would be. Each tuning has 20 flights and starts from the hand
+weights; Bayesian optimization (8.6) and random search tune three times each, and the best
+weights of each tuning are flown three more times.
+
+<Figure src="/media/pendulum-lab/learn_tuning.png" width={100} alt="Two panels. Left, the lowest cost measured so far against the number of flights, for three tunings by Bayesian optimization and three by random search: all lie between 0.42 and 0.62 centimetres, below the band of the hand weights re-tested, 0.63 to 0.79 centimetres, and most improve only once or twice. Right, the best weights of each tuning, flown three more times: the costs lie between 0.48 and 0.79 centimetres, most of them inside or just below the hand weights' band, for both methods">
+
+The lowest cost measured in each tuning (left), and the best weights flown again (right); the
+band is the hand weights, flown three times
+
+</Figure>
+
+| | best measured | flown again | position | pitch | joints | integral |
+|---|---|---|---|---|---|---|
+| hand weights (9.3) | | 0.68 cm (0.63 to 0.79) | 0.10 m | 0.10 rad | 0.10 rad | 0.20 |
+| Bayesian optimization, 1 | 0.50 cm | 0.70 cm | 0.108 m | 0.408 rad | 0.302 rad | 0.052 |
+| Bayesian optimization, 2 | 0.42 cm | 0.60 cm | 0.059 m | 0.131 rad | 0.029 rad | 0.179 |
+| Bayesian optimization, 3 | 0.50 cm | 0.57 cm | 0.020 m | 0.391 rad | 0.020 rad | 0.050 |
+| random search, 1 | 0.53 cm | 0.69 cm | 0.026 m | 0.292 rad | 0.252 rad | 0.121 |
+| random search, 2 | 0.55 cm | 0.77 cm | 0.295 m | 0.050 rad | 0.040 rad | 0.529 |
+| random search, 3 | 0.51 cm | 0.61 cm | 0.138 m | 0.209 rad | 0.037 rad | 0.061 |
+
+The tip's RMS error over the mission, and the weights each tuning chose (the largest tolerated
+deviation of each state)
+
+What it shows:
+
+- **The best measurement is optimistic.** Every tuning's best flight beats the hand weights
+  (0.42 to 0.55 cm against 0.68), and every re-test gives back most of the gain (0.57 to 0.77
+  cm): the minimum of 20 noisy measurements is partly luck, the winner's curse of 8.6, which a
+  tuning in the water would meet too.
+- **The gain is within the noise.** Re-tested, Bayesian optimization improves on the hand weights
+  by up to 0.1 cm, random search by less, and the hand weights themselves range over 0.16 cm from
+  flight to flight. Twenty flights cannot tell these weights apart.
+- **The weights do not matter much here.** Weights a factor of ten apart (a position of 0.02 m or
+  0.3 m) give the same error: the cost is flat. The tip's error is set by what the controller
+  knows, the estimator's precision and the object it was not told about, not by how it weighs
+  it. Tuning pays where the weights are the limit, as for the pendulum in 8.6; it is the wrong
+  tool where the information is.
+
+### Learning a correction
+
+The third kind learns no model at all. As in 8.4, the LQR does the work and an agent (soft
+actor-critic, two layers of 64) adds a correction every 100 ms, at most a tenth of each input's
+range. The task is the hard part of the mission: hold the tip on its target for 15 s while the
+current and the object vary, and the gripper closes at a random moment. Each training episode
+draws a current from 0 to 0.3 m/s, an object from 0.3 to 1.5 kg (as dense as that of 9.3) and a
+grasp between 3 and 8 s. The LQR gets no estimate of the current or the load, only its integral
+action, so the agent has something to repair. The reward is the negative squared tip error and
+pitch, and a small price on the correction. To keep training affordable, the environment works
+on the true state, without the estimator, as 8.1 to 8.4 did: its numbers are not those of the
+missions above.
+
+Three agents train for 100 000 steps (2.8 hours of flight, about 670 episodes; an hour of
+computation each) and are tested on five held-out episodes as in training, and on five with an
+object of 2 kg in a current of 0.5 m/s, both outside the training range.
+
+<Figure src="/media/pendulum-lab/learn_rl.png" width={100} alt="Two panels. Left, the return per episode while training, a running mean of 20 episodes, for three agents: from about minus 5.5 it rises to about minus 2.5 after 15 000 steps and fluctuates between minus 3.5 and minus 1.4 afterwards, mostly above the minus 2.6 of the LQR alone. Right, the tip's RMS error on held-out episodes: as in training, the LQR alone gives 1.5 to 4.4 centimetres and the agents 0.6 to 3.0 centimetres; with the heavier object in the stronger current, the LQR alone gives 7.0 to 7.1 centimetres and the agents 5.6 to 6.3 centimetres">
+
+The agents while training (left; the training episodes are random, the line is the LQR alone on
+the held-out ones), and the tip's error on held-out episodes (right)
+
+</Figure>
+
+| test | controller | tip's RMS error | after the grasp, at most | correction, mean |
+|---|---|---|---|---|
+| as in training | LQR alone | 2.41 cm (1.47 to 4.36) | 7.9 cm (4.4 to 15.1) | |
+| | LQR + agent 1 | 1.55 cm (0.90 to 2.90) | 4.7 cm (2.4 to 11.1) | 5.3% |
+| | LQR + agent 2 | 1.22 cm (0.57 to 2.98) | 4.0 cm (1.7 to 10.8) | 6.4% |
+| | LQR + agent 3 | 1.48 cm (0.96 to 2.80) | 4.1 cm (1.8 to 10.4) | 5.8% |
+| 2 kg, 0.5 m/s | LQR alone | 7.06 cm (7.01 to 7.11) | 20.6 cm (20.3 to 20.9) | |
+| | LQR + agent 1 | 5.71 cm (5.57 to 5.83) | 19.2 cm (18.9 to 20.0) | 6.7% |
+| | LQR + agent 2 | 6.20 cm (6.09 to 6.32) | 17.2 cm (16.6 to 17.6) | 6.6% |
+| | LQR + agent 3 | 5.61 cm (5.55 to 5.67) | 16.7 cm (16.4 to 17.0) | 6.5% |
+
+The mean over five held-out episodes (the range in brackets), and the correction as a share of
+each input's range
+
+What it shows:
+
+- **A small correction repairs a good share.** Within the training range, every agent cuts the
+  tip's RMS error by 36 to 49% and its worst error after the grasp by 41 to 49%, with a
+  correction of 5 to 6% of each input's range. All three seeds learn it, in about 15 000 steps.
+- **Outside the training range it helps less, and still helps.** With an object a third heavier
+  and a current stronger than any it saw, the agents cut the error by 12 to 21%; the tip
+  still ends up 17 to 19 cm away after the grasp. The bound is what keeps an agent outside its
+  experience from making things worse; nothing guarantees that it will not.
+- **It is expensive in data.** The agents needed 2.8 hours of flight each to learn what the
+  physics learner got from half a second: the object's effect, without knowing that it is an
+  object. Residual RL pays where no model of the error is at hand; where one is, learn it.
+
+### What we learned
+
+- **Learn the physics where the physics is wrong.** After the grasp, two parameters fitted to
+  half a second of the raw sensors bring the NMPC from never settling back to the accuracy it
+  has when told.
+- **Learn from measurements, not from estimates.** The estimator had already explained the
+  object away as a tip force; a learner fed with its states learned an object twice too heavy.
+- **A learned residual in an optimizing controller fails.** A network trained on one trajectory
+  is wrong a little way off it, and the NMPC plans through it. 8.3 showed this on the pendulum;
+  here it is worse than learning nothing.
+- **Tuning helps where the weights are the limit.** With the error set by the estimator and the
+  unknown object, Bayesian optimization finds weights a factor of ten apart that do equally well,
+  and the best measured is optimistic by about 0.2 cm. A gain within the noise is not a gain.
+- **Bounded residual RL is robust in what it does, not in what it promises.** A correction of
+  6% of the inputs cuts the error by a third to a half where the agent was trained, and less
+  outside it, at the cost of hours of flight and without a guarantee.
+
+## 9.6 What scaled, and what did not
+
+Section 8.7 predicted, from the pendulum alone, which of its conclusions would carry over to an
+underwater manipulator. This chapter put most of them to a test, on a system with ten states
+instead of four, five inputs instead of one, a floating base, thrusters, and sensors that are
+slow and noisy. This section adds no experiments; every number comes from 9.1 to 9.5.
+
+### The predictions, checked
+
+| 8.7 predicted | chapter 9 found | |
+|---|---|---|
+| the model has many more parameters, known worse: identify first | textbook drag 2.3 to 3.6 times too low, and a vehicle that tumbles where the true one does not; a minute of experiments within 5% (9.1, 9.2) | held |
+| learning inside an MPC favours physics over a network | two parameters from 0.5 s settle the NMPC where it never settled; the residual network drives it 85 to 115 cm off (9.5) | held, more sharply |
+| a bounded correction on a classical controller repairs its weak spots | 6% of the inputs cuts the error by 36 to 49%, by 12 to 21% outside training (9.5) | held |
+| a safety filter is a precondition, and fails when the inputs run out | it holds the tip 1.7 cm short of the structure under an unsafe command, and halves the intrusion in a current beyond the thrusters (9.4) | held, with conditions |
+| tuning by experiment fits scarce test time | 20 flights find weights no better than the hand ones once re-tested (9.5) | did not carry over |
+| dimension breaks the methods that cover the state space | the MPC stays real-time (34 ms of 100 ms) and Bayesian optimization handles four weights; nothing here gridded the state space (9.3, 9.5) | not tested |
+| perception is slower and noisier | the estimate sets the floor (1 to 2 cm with an acoustic fix once a second), biases the learner and breaks the filter's guarantee (9.3 to 9.5) | held, and mattered most |
+
+### What scaled
+
+- **Structure.** The pendulum's equations and the vehicle's share their form, and so do the
+  methods built on it: the identification of 6.4, the LQR, the NMPC and the barriers of 7.8
+  extend to five inputs with the same derivations. Where a method used the model's structure,
+  it scaled; the cost grew with the problem (34 ms per MPC iteration, against 10 ms on the
+  pendulum), not with the number of states it had to cover.
+- **Identification as the first step.** On the pendulum, identification refined a good model to
+  0.16%. Here the starting model was qualitatively wrong, and identification is what made the
+  model usable at all: for the planner, for the estimator, and for every learner after them.
+- **Physics as the thing to learn.** Re-identifying a few parameters of a known structure won on
+  the pendulum (8.3) and wins here: two, from half a second of data after the grasp. A network
+  in the same place failed on the pendulum and fails worse here: the more an optimizer leans on
+  the model, the more a wrong model costs.
+- **Constraints as optimization.** On the pendulum a filter could clip one input. With five
+  inputs and eight limits it solves a quadratic program, and decides on its own which input
+  gives way (it folded the arm rather than backing the vehicle off). The formulation scaled; the
+  choice of which input yields became a design decision.
+- **Residual learning.** A small, bounded correction on a working controller learned in all
+  seeds, as on the pendulum (8.4), and still helped outside its training range. It needed an hour
+  of computation for 100 000 steps, against 45 minutes for 300 000 on the pendulum: each step
+  of the vehicle costs about four times as much to simulate.
+- **The warnings, too.** Error bars computed given the model are confidently wrong when the model
+  is: on the pendulum the arm's damping was off by 116% against a claimed 0.6% (6.5), here a 17%
+  error in the arm's drag biased the vehicle's coefficients twenty times beyond their standard
+  errors (9.2). And a filter's guarantee leaks between samples (7.8): here it must run five
+  times faster than the controller it guards (9.4).
+
+### What did not
+
+- **The state as a given.** The pendulum's encoders, 500 times a second, made the estimator
+  nearly invisible; the controllers of chapters 7 and 8 could treat the state as known. Here the
+  estimate is the limit of almost everything: no controller places the tip better than the
+  vehicle's position is known, the safety filter keeps its margin only where the estimator puts
+  the vehicle (one flight in three touches the structure without the range sensor), and a
+  learner fed with the estimator's states learns an object twice too heavy. This is the largest
+  difference between the two systems, and 8.7 named it without measuring it.
+- **Tuning.** On the pendulum, 50 experiments beat a model-based design (8.6). Here the cost is
+  flat in the weights, because what limits the controller is what it knows, not how it weighs
+  it. Tuning pays where the weights are the limit; whether they are is the first question.
+
+### What this chapter does not show
+
+- **The sea.** The "true" vehicle differs from its model by choices made here: its drag, its
+  thrusters, its current. The gap to a real vehicle in real water is not measured; as for the
+  pendulum (8.7), it is the main open problem, and the hardware chapter is where this report
+  starts to meet it.
+- **Three dimensions and a full arm.** The vehicle moves in a plane with a two-link arm: 10
+  states and 5 inputs, not the 24 states and a dozen inputs of 8.7's example. Grid-based
+  verification (8.5) and the regions of attraction of 7.2 were not attempted.
+- **Contact.** The grasp is a change of mass and volume at a known moment, not a contact force;
+  pushing, tool use and switching contact are not modelled.
+- **The rest of chapter 8.** Learning from scratch (8.1), training under a filter (8.2) and
+  distillation with certification (8.5) were not rerun here.
+
+## Chapter summary
+
+The chapter built a simulated underwater vehicle with a two-link arm and reran on it the
+methods of chapters 2 to 8 that had worked on the pendulum:
+
+| | topic | what it showed |
+|---|---|---|
+| 9.1 | the model | the pendulum's structure with added mass, drag and buoyancy; the base yields to the arm; the textbook model is qualitatively wrong |
+| 9.2 | thrusters and identification | the thrusters are part of the plant; a minute of experiments fixes the drag; a fit's reported uncertainty misses the model's errors |
+| 9.3 | model-based control | the LQR and the NMPC hold the station where a PID drifts; the unknown grasp breaks the controller that trusts its model most |
+| 9.4 | safety | a filter on eight limits keeps the arm out of the structure, if it runs fast enough on a good estimate |
+| 9.5 | learning | re-identified physics after the grasp beats a learned residual, which diverges; tuning gains no more than the noise; bounded residual RL helps at a high price in data |
+| 9.6 | what scaled | structure, identification and physics-based learning scaled; treating the state as known, and tuning, did not |
+
+Three threads run through it:
+
+- **The model is the first thing to fix, and the last to trust.** Identification turned a
+  textbook model that tumbles into one a planner can use, and re-identification after the
+  grasp rescued the NMPC; a learned residual in the same place made things worse.
+- **The estimate is the limit.** Control, safety and learning were each bounded by how well the
+  vehicle knew where it was and what it carried. On the pendulum this was invisible.
+- **Learning helps where it has structure to stand on.** Two physical parameters, a bounded
+  correction on a working controller: those worked. A network in the model and a free search over
+  weights did not.
+
+**Back to the [report index](/projects/pendulum-lab/).**

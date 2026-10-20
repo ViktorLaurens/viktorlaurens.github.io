@@ -1,0 +1,95 @@
+---
+project: pendulum-lab
+number: 10
+title: "Controller gallery"
+summary: "Every controller of chapters 7 and 8 side by side on the same pendulum: swinging up, balancing through a push, and carrying a 50 g payload."
+---
+import Figure from '../../../components/Figure.astro';
+
+Every controller of chapters 7 and 8, side by side on one clock, on the same "real" pendulum
+(with its dry friction, voltage held between samples of $500\ \text{Hz}$, at most $\pm 10$ V).
+Each tile shows the controller and its section; its result appears the moment it happens, and,
+near the end, where the arm ended up if that is far from its start. The learned agents are
+the median seed of their five, by score: a typical agent, not the best one.
+
+The controllers see the true state unless a tile says "encoders": then they see only the two
+encoder angles, through the estimators of section 6.6. The trajectories come from
+`scripts/make_gallery.py`, the animations from
+`animations/gallery_scenes.py`.
+
+## Swinging up
+
+<Figure video="/media/pendulum-lab/gallery_swing_up.mp4" width={100} alt="Nine small Furuta pendulums swing up from rest at the same time, each under another controller: energy and LQR, TVLQR, the hybrid of plan and energy, nonlinear MPC, three reinforcement learning agents and two residual agents. All end upright; the energy controller needs about 4.6 seconds and several swings, the others 1 to 1.6 seconds. Notes appear where the arm ends far away: at 188 degrees for the two controllers that follow the plan, 162 degrees for the agent from scratch, 58 degrees for the residual agent with the large correction">
+
+From rest, at half speed
+
+</Figure>
+
+What to look at:
+
+- **The energy controller (7.3)** pumps for four and a half seconds, swinging the arm through
+  more than $300^\circ$; everything else gets up in one to one and a half seconds.
+- **TVLQR and the hybrid (7.4)** follow the same optimal plan to the top. The plan ends with the
+  arm at $188^\circ$, and that is where they balance.
+- **The learned agents (8.1, 8.2, 8.4)** are the fastest, but each in its own way: the agent from
+  scratch lets the arm drift to $162^\circ$, the one with the stronger arm weight brings it back,
+  the one behind the filter keeps it within $45^\circ$. The two residual agents start from the
+  energy controller's swing and cut it short.
+
+## Balancing, and a push
+
+<Figure video="/media/pendulum-lab/gallery_balance.mp4" width={100} alt="Nine small pendulums start 8 degrees from upright and get a push at 2.5 seconds: PID, LQR, LQG on encoders, offset-free LQG with an amplifier offset, linear MPC, nonlinear MPC, LQR behind a barrier, LQR behind the predictive filter, and a reinforcement learning agent. All but one catch the pendulum and recover from the push within 0.1 to 0.35 seconds; under PID the arm keeps turning, three full turns by the end; the LQR behind the barrier drops the pendulum at once while its arm stays within 9 degrees; the learning agent stays within 2 degrees through the push but its arm ends at 127 degrees">
+
+From $8^\circ$ off upright, a push of $1.5\ \text{rad/s}$ on the pendulum at $2.5$ s, at half
+speed
+
+</Figure>
+
+What to look at:
+
+- **PID (7.1)** does hold the pendulum up, and recovers from the push fastest. But it never
+  sees the arm, which turns away: three full turns in six seconds. That is the failure section
+  7.1 is about.
+- **LQR, LQG, the offset-free LQG and both MPCs (7.2 to 7.7)** all catch the pendulum and are
+  back within $2^\circ$ some $0.2$ to $0.3$ s after the push, the arm close to where it was. The
+  LQG does it from the encoders alone; the offset-free one also despite $0.5$ V of amplifier
+  offset.
+- **The barrier (7.8)** keeps the arm within $15^\circ$, but catching an $8^\circ$ tilt needs
+  more arm travel than that, and the barrier only looks at the arm: it lets the pendulum fall.
+  **The predictive filter** next to it, with the same limit, plans ahead and catches it. That is
+  the difference section 7.8 is about.
+- **The learning agent (8.1)** holds the tilt within $2^\circ$ even through the push, the
+  firmest of all, and lets the arm wander to $127^\circ$ meanwhile.
+
+## A 50 g payload
+
+<Figure video="/media/pendulum-lab/gallery_payload.mp4" width={100} alt="Six small pendulums with a 50 gram payload at the tip, about twice the pendulum's own mass, start 5 degrees from hanging. The energy controller and the nonlinear MPC with the nominal model never get it up. The nonlinear MPC with the model re-identified after one failed attempt balances at 1.99 seconds, like the one given the exact model. A reinforcement learning agent and a residual agent, both trained on payloads of 0 to 50 grams, balance at 3.1 and 2.8 seconds">
+
+A 50 g payload at the tip, from $5^\circ$ off hanging, at half speed
+
+</Figure>
+
+What to look at:
+
+- **Designed for the pendulum without the payload**, neither the energy controller nor the
+  nonlinear MPC gets it up.
+- **The nonlinear MPC with the physics re-identified after one failed attempt (8.3)** swings it
+  up exactly like the one given the exact model, in $1.99$ s.
+- **The agents trained on payloads of 0 to 50 g (8.4)** get it up too, a second later; the one
+  on top of the energy controller with the arm near where it started, the one from scratch with
+  the arm at $65^\circ$.
+
+## Making them again
+
+```bash
+uv run python scripts/make_gallery.py
+```
+
+```bash
+uv run --group anim python scripts/render_animations.py GallerySwingUp GalleryBalance GalleryPayload
+```
+
+The first needs the trained agents and results of
+`scripts/evaluate_rl.py` (training rounds 1 and 3, safe and
+residual; sections 8.1, 8.2 and 8.4). It runs every controller of a gallery in parallel, in a
+minute or two.
