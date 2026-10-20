@@ -13,6 +13,10 @@ export interface PendulumState {
   u: number;
   energy: number;
   control: boolean;
+  /** Easter egg: double pendulum. theta2/omega2 are the second link. */
+  chaos: boolean;
+  theta2: number;
+  omega2: number;
 }
 
 export interface MountOptions {
@@ -23,6 +27,8 @@ export interface MountOptions {
 export interface PendulumHandle {
   setControl(on: boolean): void;
   getControl(): boolean;
+  setChaos(on: boolean): void;
+  getChaos(): boolean;
   reset(): void;
   destroy(): void;
 }
@@ -71,6 +77,35 @@ function accel(theta: number, omega: number, u: number): number {
   return -W0SQ * Math.sin(theta) - MU * omega + u;
 }
 
+// --- double pendulum (easter egg) -------------------------------------------
+// Two equal point masses on massless rods of length L/2 each, light damping.
+const L2 = L / 2;
+const MU2 = 0.02;
+
+function doubleAccel(t1: number, t2: number, w1: number, w2: number): [number, number] {
+  const d = t1 - t2;
+  const den = 3 - Math.cos(2 * d); // 2m1 + m2 − m2 cos 2Δ with m1 = m2 = 1
+  const a1 = (-3 * G * Math.sin(t1) - G * Math.sin(t1 - 2 * t2) - 2 * Math.sin(d) * (w2 * w2 * L2 + w1 * w1 * L2 * Math.cos(d))) / (L2 * den) - MU2 * w1;
+  const a2 = (2 * Math.sin(d) * (2 * w1 * w1 * L2 + 2 * G * Math.cos(t1) + w2 * w2 * L2 * Math.cos(d))) / (L2 * den) - MU2 * w2;
+  return [a1, a2];
+}
+
+export function rk4Double(s: [number, number, number, number], dt: number): [number, number, number, number] {
+  const f = (x: [number, number, number, number]): [number, number, number, number] => {
+    const [a1, a2] = doubleAccel(x[0], x[1], x[2], x[3]);
+    return [x[2], x[3], a1, a2];
+  };
+  const add = (x: [number, number, number, number], k: [number, number, number, number], h: number): [number, number, number, number] =>
+    [x[0] + h * k[0], x[1] + h * k[1], x[2] + h * k[2], x[3] + h * k[3]];
+  const k1 = f(s), k2 = f(add(s, k1, dt / 2)), k3 = f(add(s, k2, dt / 2)), k4 = f(add(s, k3, dt));
+  return [
+    s[0] + (dt / 6) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]),
+    s[1] + (dt / 6) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]),
+    s[2] + (dt / 6) * (k1[2] + 2 * k2[2] + 2 * k3[2] + k4[2]),
+    s[3] + (dt / 6) * (k1[3] + 2 * k2[3] + 2 * k3[3] + k4[3]),
+  ];
+}
+
 export function rk4(theta: number, omega: number, u: number, dt: number): [number, number] {
   const k1t = omega, k1w = accel(theta, omega, u);
   const k2t = omega + 0.5 * dt * k1w, k2w = accel(theta + 0.5 * dt * k1t, omega + 0.5 * dt * k1w, u);
@@ -112,6 +147,10 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
 
   let theta = 2.35, omega = 0, u = 0;
   let control = false;
+  let chaos = false;
+  let theta2 = 0, omega2 = 0; // second link, chaos mode
+  const trail2: Array<[number, number]> = []; // (θ1, θ2) history of the second bob
+  const TRAIL2_MAX = 700;
   let running = true, visible = true;
   let last = 0, acc = 0, lastReport = 0;
   let width = 0, height = 0, dpr = 1;
@@ -203,7 +242,45 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
     drawPhase(c);
   }
 
+  function bob2(t1: number, t2: number): [number, number] {
+    const { px, py, r } = pend;
+    const h = r / 2;
+    return [px + h * Math.sin(t1) + h * Math.sin(t2), py + h * Math.cos(t1) + h * Math.cos(t2)];
+  }
+
+  function drawDouble(c: CanvasRenderingContext2D) {
+    const { px, py, r } = pend;
+    const h = r / 2;
+    const mono = getComputedStyle(canvas).getPropertyValue('--font-mono') || 'monospace';
+    c.beginPath(); c.arc(px, py, r, 0, Math.PI * 2);
+    c.strokeStyle = palette.line; c.lineWidth = 1; c.setLineDash([3, 6]); c.stroke(); c.setLineDash([]);
+    // trail of the second bob
+    if (trail2.length > 1) {
+      c.lineWidth = 1.5; c.lineJoin = 'round';
+      const n = trail2.length;
+      for (let i = 1; i < n; i++) {
+        const [ax, ay] = bob2(trail2[i - 1][0], trail2[i - 1][1]);
+        const [bx, by] = bob2(trail2[i][0], trail2[i][1]);
+        c.globalAlpha = 0.05 + 0.75 * (i / n) ** 2;
+        c.strokeStyle = palette.yellow;
+        c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+      }
+      c.globalAlpha = 1;
+    }
+    const x1 = px + h * Math.sin(theta), y1 = py + h * Math.cos(theta);
+    const [x2, y2] = bob2(theta, theta2);
+    c.beginPath(); c.moveTo(px, py); c.lineTo(x1, y1); c.lineTo(x2, y2);
+    c.strokeStyle = palette.fg; c.lineWidth = 2; c.lineCap = 'round'; c.lineJoin = 'round'; c.stroke();
+    c.beginPath(); c.arc(px, py, 4, 0, Math.PI * 2); c.fillStyle = palette.fg; c.fill();
+    c.beginPath(); c.arc(x1, y1, 9, 0, Math.PI * 2); c.fillStyle = palette.accent; c.fill();
+    c.beginPath(); c.arc(x2, y2, 9, 0, Math.PI * 2); c.fillStyle = palette.yellow; c.fill();
+    if (dragging) { c.lineWidth = 2; c.strokeStyle = palette.fg; c.beginPath(); c.arc(x1, y1, 9, 0, Math.PI * 2); c.stroke(); }
+    c.font = `500 11px ${mono}`; c.fillStyle = palette.red; c.textAlign = 'left';
+    c.fillText('chaos mode · double pendulum · esc to leave', pend.x + 2, pend.y + pend.h - 4);
+  }
+
   function drawPendulum(c: CanvasRenderingContext2D) {
+    if (chaos) return drawDouble(c);
     const { px, py, r } = pend;
     const bx = px + r * Math.sin(theta), by = py + r * Math.cos(theta);
 
@@ -254,6 +331,35 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
   function drawPhase(c: CanvasRenderingContext2D) {
     const { x, y, w, h } = phase;
     const mono = getComputedStyle(canvas).getPropertyValue('--font-mono') || 'monospace';
+
+    if (chaos) {
+      // (θ₁, θ₂) on the torus, unwrapped into a square
+      c.strokeStyle = palette.line; c.lineWidth = 1;
+      c.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      const to = (t1: number, t2: number): [number, number] => [x + ((wrap(t1) + Math.PI) / (2 * Math.PI)) * w, y + ((Math.PI - wrap(t2)) / (2 * Math.PI)) * h];
+      const [mx, my] = to(0, 0);
+      c.beginPath(); c.moveTo(x, my); c.lineTo(x + w, my); c.moveTo(mx, y); c.lineTo(mx, y + h); c.stroke();
+      if (trail2.length > 1) {
+        c.lineWidth = 1.4;
+        const n = trail2.length;
+        for (let i = 1; i < n; i++) {
+          const [a1, a2] = trail2[i - 1], [b1, b2] = trail2[i];
+          if (Math.abs(wrap(b1) - wrap(a1)) > Math.PI || Math.abs(wrap(b2) - wrap(a2)) > Math.PI) continue;
+          const [ax, ay] = to(a1, a2), [bx, by] = to(b1, b2);
+          c.globalAlpha = 0.08 + 0.92 * (i / n) ** 2; c.strokeStyle = palette.yellow;
+          c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke();
+        }
+        c.globalAlpha = 1;
+      }
+      const [cx, cy] = to(theta, theta2);
+      c.beginPath(); c.arc(cx, cy, 5, 0, Math.PI * 2); c.fillStyle = palette.yellow; c.fill();
+      c.fillStyle = palette.muted; c.font = `500 11px ${mono}`; c.textAlign = 'center';
+      c.fillText('−π', x, y + h + 14); c.fillText('0', mx, y + h + 14); c.fillText('π', x + w, y + h + 14);
+      c.fillText('θ₁', x + w / 2, y + h + 26);
+      c.textAlign = 'right'; c.fillText('θ₂', x - 8, my + 4);
+      c.textAlign = 'left'; c.fillStyle = palette.faint; c.fillText('configuration space (θ₁, θ₂)', x + 6, y + 14);
+      return;
+    }
 
     // frame and field
     if (field) c.drawImage(field, x, y, w, h);
@@ -311,6 +417,13 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
   // --- loop -----------------------------------------------------------------
 
   function step(dt: number) {
+    if (chaos) {
+      u = 0;
+      [theta, theta2, omega, omega2] = rk4Double([theta, theta2, omega, omega2], dt);
+      if (Math.abs(theta) > 50) theta = wrap(theta);
+      if (Math.abs(theta2) > 50) theta2 = wrap(theta2);
+      return;
+    }
     u = control ? controller(theta, omega) : 0;
     [theta, omega] = rk4(theta, omega, u, dt);
     if (Math.abs(theta) > 50) theta = wrap(theta);
@@ -325,15 +438,20 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
       if (!dragging) {
         acc += elapsed;
         while (acc >= DT) { step(DT); acc -= DT; }
-        trail.push([theta, omega]);
-        if (trail.length > TRAIL_MAX) trail.shift();
+        if (chaos) {
+          trail2.push([theta, theta2]);
+          if (trail2.length > TRAIL2_MAX) trail2.shift();
+        } else {
+          trail.push([theta, omega]);
+          if (trail.length > TRAIL_MAX) trail.shift();
+        }
       }
       ghost.push([theta, omega]);
       if (ghost.length > GHOST_MAX) ghost.shift();
       draw();
       if (onState && now - lastReport > 80) {
         lastReport = now;
-        onState({ theta: wrap(theta), omega, u, energy: energy(theta, omega), control });
+        onState({ theta: wrap(theta), omega, u, energy: energy(theta, omega), control, chaos, theta2: wrap(theta2), omega2 });
       }
     }
     requestAnimationFrame(frame);
@@ -359,6 +477,7 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
     canvas.setPointerCapture(e.pointerId);
     theta = pointerAngle(e);
     omega = 0; dragOmega = 0;
+    if (chaos) { theta2 = theta; omega2 = 0; trail2.length = 0; }
     dragPrev = { theta, t: performance.now() };
     trail.length = 0;
     e.preventDefault();
@@ -371,6 +490,7 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
     const dth = wrap(th - dragPrev.theta);
     dragOmega = 0.6 * dragOmega + 0.4 * (dth / dt);
     theta = dragPrev.theta + dth;
+    if (chaos) theta2 = theta;
     dragPrev = { theta, t: now };
   };
   const onUp = (e: PointerEvent) => {
@@ -402,9 +522,15 @@ export function mountPendulum({ canvas, onState }: MountOptions): PendulumHandle
   requestAnimationFrame(frame);
 
   return {
-    setControl(on) { control = on; trail.length = 0; },
+    setControl(on) { if (chaos) return; control = on; trail.length = 0; },
     getControl() { return control; },
-    reset() { theta = 2.35; omega = 0; u = 0; control = false; trail.length = 0; ghost.length = 0; acc = 0; },
+    setChaos(on) {
+      chaos = on; control = false; trail.length = 0; trail2.length = 0; ghost.length = 0;
+      if (on) { theta = Math.PI * 0.75; theta2 = Math.PI * 0.9; omega = 0; omega2 = 0; }
+      else { theta = wrap(theta); omega = Math.max(-6, Math.min(6, omega)); }
+    },
+    getChaos() { return chaos; },
+    reset() { theta = 2.35; omega = 0; u = 0; control = false; chaos = false; trail.length = 0; trail2.length = 0; ghost.length = 0; acc = 0; },
     destroy() {
       running = false;
       ro.disconnect(); io.disconnect(); mo.disconnect();
