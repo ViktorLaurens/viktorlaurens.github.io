@@ -10,9 +10,11 @@ const isActive = (href: string) => path === href || path.startsWith(href);
   <div class="container nav__in">
     <a class="brand" href="/" aria-label="Home">
       <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
-        <line class="brand__rod" x1="16" y1="5" x2="23" y2="22" />
+        <g class="brand__swing" data-brand-swing>
+          <line class="brand__rod" x1="16" y1="5" x2="23" y2="22" />
+          <circle class="brand__bob" cx="23" cy="22" r="4.5" />
+        </g>
         <circle cx="16" cy="5" r="2" fill="currentColor" />
-        <circle class="brand__bob" cx="23" cy="22" r="4.5" />
       </svg>
       <span class="brand__name">Viktor Laurens De&nbsp;Groote</span>
     </a>
@@ -37,6 +39,38 @@ const isActive = (href: string) => path === href || path.startsWith(href);
 </header>
 
 <script>
+  // The logo is a real damped pendulum: hovering (or a new page) gives it a kick.
+  // Rest angle is the drawn pose; θ is the deviation from it.
+  (() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) return;
+    const W0 = 7.5, MU = 1.1; // rad/s, 1/s: a quick, visibly underdamped swing
+    let theta = 0, omega = 0, raf = 0, last = 0;
+    const el = () => document.querySelector<SVGGElement>('[data-brand-swing]');
+    const tick = (now: number) => {
+      const g = el();
+      if (!g) { raf = 0; return; }
+      const dt = Math.min((now - last) / 1000, 0.05) || 1 / 60;
+      last = now;
+      // linearised about the rest pose, which is what a small logo should feel like
+      const a = -W0 * W0 * theta - MU * omega;
+      omega += a * dt; theta += omega * dt;
+      g.style.transform = `rotate(${(theta * 180) / Math.PI}deg)`;
+      if (Math.abs(theta) < 0.002 && Math.abs(omega) < 0.01) { theta = 0; omega = 0; g.style.transform = ''; raf = 0; return; }
+      raf = requestAnimationFrame(tick);
+    };
+    const kick = (impulse: number) => {
+      omega = Math.max(-6, Math.min(6, omega + impulse));
+      if (!raf) { last = performance.now(); raf = requestAnimationFrame(tick); }
+    };
+    // pointerenter does not bubble; capture it on the document and act only for the link itself
+    document.addEventListener('pointerenter', (e) => {
+      const t = e.target as Element | null;
+      if (t && t.classList && t.classList.contains('brand')) kick(-4);
+    }, true);
+    document.addEventListener('astro:page-load', () => kick(-2.5));
+  })();
+
   // Delegated so it keeps working after client-side navigations.
   document.addEventListener('click', (e) => {
     if (!(e.target as Element).closest('#theme-toggle')) return;
@@ -57,9 +91,9 @@ const isActive = (href: string) => path === href || path.startsWith(href);
   .brand { display: inline-flex; align-items: center; gap: .6em; text-decoration: none; font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
   .brand:hover { color: var(--fg); }
   .brand__mark { width: 28px; height: 28px; color: var(--fg); overflow: visible; }
-  .brand__rod { stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; transition: transform .5s var(--ease); transform-origin: 16px 5px; }
-  .brand__bob { fill: var(--accent); transition: transform .5s var(--ease); transform-origin: 16px 5px; }
-  .brand:hover .brand__bob, .brand:hover .brand__rod { transform: rotate(-50deg); }
+  .brand__rod { stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .brand__bob { fill: var(--accent); }
+  .brand__swing { transform-box: view-box; transform-origin: 16px 5px; will-change: transform; }
   .brand__name { font-size: 1rem; }
   .nav__links { display: flex; align-items: center; gap: clamp(.6rem, 2vw, 1.5rem); list-style: none; margin: 0; padding: 0; }
   .nav__links a { text-decoration: none; color: var(--fg-muted); font-weight: 500; font-size: .95rem; padding: .3em 0; border-bottom: 1.5px solid transparent; }

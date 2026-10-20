@@ -3,12 +3,76 @@ import Base from '../layouts/Base.astro';
 ---
 <Base title="Not found">
   <section class="section container nf">
-    <p class="eyebrow eyebrow--accent">404</p>
-    <h1>This one fell over.</h1>
-    <p class="lede">The page you asked for is not a stable equilibrium. Try the <a href="/">home page</a> or the <a href="/projects/">projects</a>.</p>
+    <div class="nf__text">
+      <p class="eyebrow eyebrow--accent">404 · unstable equilibrium</p>
+      <h1>This one fell over.</h1>
+      <p class="lede">
+        The page you asked for is not a fixed point of this site. The upright one never was.
+        Try the <a href="/">home page</a> or the <a href="/projects/">projects</a>.
+      </p>
+      <p class="mono faint nf__eq">θ* = π · eigenvalues −μ/2 ± √(μ²/4 + ω₀²) · one of them is positive</p>
+    </div>
+    <svg class="nf__art" viewBox="0 0 400 260" aria-hidden="true">
+      <!-- floor -->
+      <line class="nf__floor" x1="20" y1="220" x2="380" y2="220" />
+      <!-- shadow of where it should have been -->
+      <g class="nf__ghost">
+        <line x1="200" y1="220" x2="200" y2="60" />
+        <circle cx="200" cy="60" r="14" />
+      </g>
+      <!-- broken pivot on the floor -->
+      <circle class="nf__pivot" cx="200" cy="220" r="5" />
+      <!-- the pendulum, pivoting at (200,220), falls from upright to the floor -->
+      <g class="nf__pendulum">
+        <line class="nf__rod" x1="200" y1="220" x2="200" y2="60" />
+        <circle class="nf__bob" cx="200" cy="60" r="14" />
+      </g>
+      <!-- dust puff -->
+      <g class="nf__dust">
+        <circle cx="352" cy="216" r="3" />
+        <circle cx="366" cy="208" r="2" />
+        <circle cx="340" cy="206" r="2.5" />
+      </g>
+    </svg>
   </section>
 </Base>
 
 <style>
-  .nf { display: grid; gap: var(--space-4); min-height: 50dvh; align-content: center; }
+  .nf { display: grid; gap: var(--space-12); align-items: center; min-height: 60dvh; }
+  @media (min-width: 820px) { .nf { grid-template-columns: 1.1fr 1fr; } }
+  .nf__text { display: grid; gap: var(--space-4); }
+  .nf__eq { font-size: .8rem; margin-top: var(--space-4); }
+  .nf__art { width: 100%; max-width: 480px; justify-self: center; }
+  .nf__floor { stroke: var(--line-strong); stroke-width: 2; stroke-linecap: round; }
+  .nf__ghost line { stroke: var(--line); stroke-width: 2; stroke-dasharray: 4 8; }
+  .nf__ghost circle { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 4 6; }
+  .nf__pivot { fill: var(--fg); }
+  .nf__rod { stroke: var(--fg); stroke-width: 3; stroke-linecap: round; }
+  .nf__bob { fill: var(--red); }
+  .nf__pendulum {
+    transform-box: view-box;
+    transform-origin: 200px 220px;
+    animation: nf-fall 3.2s cubic-bezier(.55, 0, 1, .45) .6s both;
+  }
+  .nf__dust circle { fill: var(--fg-faint); opacity: 0; animation: nf-dust .9s ease-out 3.75s both; }
+  .nf__dust circle:nth-child(2) { animation-delay: 3.85s; }
+  .nf__dust circle:nth-child(3) { animation-delay: 3.8s; }
+  @keyframes nf-fall {
+    0%   { transform: rotate(0deg); }
+    6%   { transform: rotate(1.5deg); }
+    70%  { transform: rotate(90deg); animation-timing-function: cubic-bezier(.2, .9, .4, 1); }
+    80%  { transform: rotate(84deg); animation-timing-function: cubic-bezier(.6, 0, 1, .6); }
+    88%  { transform: rotate(90deg); animation-timing-function: cubic-bezier(.2, .9, .4, 1); }
+    94%  { transform: rotate(88.5deg); }
+    100% { transform: rotate(90deg); }
+  }
+  @keyframes nf-dust {
+    0% { opacity: 0; transform: translate(0, 0); }
+    30% { opacity: .9; }
+    100% { opacity: 0; transform: translate(12px, -16px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .nf__pendulum { animation: none; transform: rotate(90deg); }
+    .nf__dust { display: none; }
+  }
 </style>
