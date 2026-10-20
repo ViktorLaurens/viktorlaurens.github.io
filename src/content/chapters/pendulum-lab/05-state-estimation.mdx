@@ -5,6 +5,7 @@ title: "State estimation"
 summary: "Real-time estimates from angle measurements: Kalman, extended and unscented filters, outlier gating, consistency, online parameters and the RTS smoother."
 ---
 import Figure from '../../../components/Figure.astro';
+import KalmanDemo from '../../../components/KalmanDemo.astro';
 
 Chapters 2 to 4 identified the pendulum *after* the experiment, using the whole recording at
 once. Even the Savitzky–Golay derivative of section 2.2 used samples from the future: its
@@ -359,6 +360,10 @@ at $t = 5\ \text{s}$ and only recovers for good after $15.5\ \text{s}$, once the
 enough for the two trajectories to meet. Practical safeguards are an honest initial
 covariance, a start-up period without gating, and a reset when many consecutive samples are
 rejected; a long run of rejections is never "a lot of outliers", it is a lost filter.
+
+Sections 5.2 to 5.4 in one live loop: a pendulum measured at 100 Hz through a noisy, outlier-prone angle sensor, and a filter estimating its state. Try the linear filter on a large swing, raise the outlier rate with the gate off, and push q to both extremes.
+
+<KalmanDemo />
 
 ### What we learned
 

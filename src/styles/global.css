@@ -93,6 +93,26 @@ p { margin: 0; }
 .tag { font-family: var(--font-mono); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); border: 1px solid var(--line); border-radius: 999px; padding: .2em .65em; }
 .grid { display: grid; gap: var(--space-6); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
 
+/* Live demos */
+.demo { margin: 2.5em 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); padding: var(--space-4); display: grid; gap: var(--space-3); }
+.demo__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+.demo__label { font-family: var(--font-mono); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
+.demo__hint { font-size: .85rem; color: var(--fg-muted); line-height: 1.45; }
+.demo canvas { width: 100%; border-radius: var(--radius); background: var(--bg-sunken); border: 1px solid var(--line); touch-action: none; }
+.demo__controls { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); align-items: end; }
+.demo__control { display: grid; gap: .3em; flex: 1 1 150px; max-width: 240px; }
+.demo__control label { display: flex; justify-content: space-between; gap: 1em; color: var(--fg-muted); font-family: var(--font-mono); font-size: .76rem; }
+.demo__control output { color: var(--fg); }
+.demo__control sup { font-size: .8em; }
+.demo__control input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent); }
+.demo__buttons { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+.demo__stats { display: flex; gap: var(--space-6); flex-wrap: wrap; font-family: var(--font-mono); font-size: .78rem; color: var(--fg-muted); }
+.demo__stats b { color: var(--fg); font-weight: 500; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: .5em .85em; cursor: pointer; color: var(--fg-muted); font-size: .9rem; line-height: 1; }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+
 /* Utilities */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .visually-rule { height: 1px; background: linear-gradient(90deg, transparent, var(--line-strong), transparent); }

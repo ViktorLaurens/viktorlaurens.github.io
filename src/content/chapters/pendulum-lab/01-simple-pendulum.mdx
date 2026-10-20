@@ -5,6 +5,7 @@ title: "The simple pendulum"
 summary: "The forward problem: equation of motion, the small-angle approximation and where it breaks, state space, fixed points and the phase flow."
 ---
 import Figure from '../../../components/Figure.astro';
+import PhasePortraitDemo from '../../../components/PhasePortraitDemo.astro';
 
 This chapter is the **forward problem** of the report: given the equation of motion, its
 parameters and an initial state, what motion follows? Every later chapter turns this around
@@ -206,6 +207,10 @@ reach the bottom faster.
 $\mu$ sweeps $0 \to 2.5 \to 0.25\ \text{s}^{-1}$; trajectories start at $(\theta_0, \dot\theta_0) = (0, 5.5),\ (1.7, 0),\ ({-0.8}, {-2.4})$ and $(2.9, 0)$ in rad and rad/s
 
 </Figure>
+
+The report's animation sweeps μ once. Here the field is live: change the damping or the natural frequency, and release your own pendulums from any state.
+
+<PhasePortraitDemo />
 
 ## 1.6 Phase flow
 
