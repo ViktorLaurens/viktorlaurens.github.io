@@ -2,7 +2,13 @@
 /**
  * A figure with an image or a looping video and a caption (default slot).
  * `width` is a percentage of the text column, as in the source report.
+ * Image dimensions are read from the PNG header at build time so the page
+ * reserves the right space before the file arrives (no layout shift, and
+ * anchor links land where they should).
  */
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 interface Props {
   src?: string;
   video?: string;
@@ -10,19 +16,33 @@ interface Props {
   width?: number;
 }
 const { src, video, alt, width = 100 } = Astro.props;
+
+let dims: { w: number; h: number } | undefined;
+if (src && src.startsWith('/') && src.endsWith('.png')) {
+  const file = join(process.cwd(), 'public', src);
+  if (existsSync(file)) {
+    const buf = readFileSync(file);
+    // PNG: 8-byte signature, then IHDR chunk; width and height are big-endian at offsets 16 and 20.
+    if (buf.length > 24 && buf.toString('ascii', 12, 16) === 'IHDR') {
+      dims = { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    }
+  }
+}
+// The report's Manim animations are rendered at 1920×1080.
+const videoRatio = '16 / 9';
 ---
 <figure class="fig" style={`--w: ${width}%`}>
   {video ? (
-    <video class="fig__media" src={video} loop muted playsinline preload="metadata" data-autoplay aria-label={alt}></video>
+    <video class="fig__media" src={video} loop muted playsinline preload="metadata" data-autoplay aria-label={alt} style={`aspect-ratio: ${videoRatio}`}></video>
   ) : (
-    <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" />
+    <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" width={dims?.w} height={dims?.h} />
   )}
   <figcaption><slot /></figcaption>
 </figure>
 
 <style>
   .fig { margin: 2em 0; display: grid; justify-items: center; gap: .6em; }
-  .fig__media { width: var(--w); max-width: 100%; border-radius: var(--radius); background: #000; }
+  .fig__media { width: var(--w); max-width: 100%; height: auto; border-radius: var(--radius); background: #000; }
   figcaption { font-size: .88rem; color: var(--fg-muted); text-align: center; max-width: 60ch; line-height: 1.5; }
   figcaption :global(p) { margin: 0; }
   figcaption :global(.katex) { font-size: 1em; }

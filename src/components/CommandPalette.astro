@@ -1,0 +1,219 @@
+---
+/** ⌘K / Ctrl+K palette: jump to any page or section, or run a site action. */
+---
+<dialog class="cmdk" id="cmdk" aria-label="Search and commands">
+  <form class="cmdk__box" method="dialog">
+    <div class="cmdk__input-row">
+      <svg class="cmdk__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      <input class="cmdk__input" id="cmdk-input" type="text" placeholder="Jump to a chapter, a section, or an action…" autocomplete="off" spellcheck="false" aria-controls="cmdk-list" aria-expanded="true" role="combobox" aria-autocomplete="list" />
+      <kbd class="cmdk__esc">esc</kbd>
+    </div>
+    <ul class="cmdk__list" id="cmdk-list" role="listbox"></ul>
+    <div class="cmdk__foot mono">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> open</span>
+      <span class="cmdk__count" id="cmdk-count"></span>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  import { navigate } from 'astro:transitions/client';
+
+  interface Entry { title: string; group: string; url: string; kind: 'page' | 'section' | 'action'; keywords?: string; run?: () => void }
+
+  // The index survives client-side navigations; the DOM does not, so elements are
+  // looked up on demand and page-level listeners are rebound on astro:page-load.
+  let index: Entry[] | null = null;
+  let results: Entry[] = [];
+  let active = 0;
+  let pageAbort = new AbortController();
+
+  const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
+  const dialog = () => $<HTMLDialogElement>('cmdk');
+  const input = () => $<HTMLInputElement>('cmdk-input');
+  const list = () => $<HTMLUListElement>('cmdk-list');
+  const count = () => $<HTMLElement>('cmdk-count');
+
+  const actions: Entry[] = [
+    { title: 'Toggle light / dark theme', group: 'Actions', url: '', kind: 'action', keywords: 'colour color mode', run: () => $<HTMLButtonElement>('theme-toggle')?.click() },
+    { title: 'Download CV (PDF)', group: 'Actions', url: '/cv.pdf', kind: 'action', keywords: 'resume curriculum vitae' },
+    { title: 'Email viktor.degroote@gmail.com', group: 'Actions', url: 'mailto:viktor.degroote@gmail.com', kind: 'action', keywords: 'contact mail' },
+    { title: 'LinkedIn profile', group: 'Actions', url: 'https://www.linkedin.com/in/viktor-laurens-de-groote/', kind: 'action', keywords: 'contact' },
+    { title: 'GitHub profile', group: 'Actions', url: 'https://github.com/ViktorLaurens', kind: 'action', keywords: 'code source' },
+    { title: 'Site source on GitHub', group: 'Actions', url: 'https://github.com/ViktorLaurens/viktorlaurens.github.io', kind: 'action', keywords: 'repository astro' },
+  ];
+
+  async function load(): Promise<Entry[]> {
+    if (index) return index;
+    try {
+      const res = await fetch('/search.json');
+      index = [...((await res.json()) as Entry[]), ...actions];
+    } catch {
+      index = actions;
+    }
+    return index;
+  }
+
+  // --- scoring: every query token must appear; prefer prefix and title matches ---
+  const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  function score(e: Entry, tokens: string[]): number {
+    const title = norm(e.title), group = norm(e.group), extra = norm(e.keywords ?? '');
+    let s = 0;
+    for (const t of tokens) {
+      if (title.startsWith(t)) s += 30;
+      else if (title.split(/\W+/).some((w) => w.startsWith(t))) s += 20;
+      else if (title.includes(t)) s += 12;
+      else if (group.includes(t)) s += 6;
+      else if (extra.includes(t)) s += 4;
+      else return -1;
+    }
+    if (e.kind === 'page') s += 3;
+    return s - Math.min(title.length, 60) / 60;
+  }
+
+  function search(q: string): Entry[] {
+    const all = index ?? actions;
+    const tokens = norm(q).split(/\s+/).filter(Boolean);
+    if (!tokens.length) {
+      const pages = all.filter((e) => e.kind === 'page').slice(0, 9);
+      return [...pages, ...actions.slice(0, 3)];
+    }
+    return all
+      .map((e) => ({ e, s: score(e, tokens) }))
+      .filter((x) => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 40)
+      .map((x) => x.e);
+  }
+
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  function highlight(text: string, q: string): string {
+    const tokens = norm(q).split(/\s+/).filter(Boolean);
+    if (!tokens.length) return esc(text);
+    const lower = norm(text);
+    let out = '', i = 0;
+    while (i < text.length) {
+      const hit = tokens.map((t) => ({ t, at: lower.indexOf(t, i) })).filter((h) => h.at >= 0).sort((a, b) => a.at - b.at)[0];
+      if (!hit) { out += esc(text.slice(i)); break; }
+      out += esc(text.slice(i, hit.at)) + '<mark>' + esc(text.slice(hit.at, hit.at + hit.t.length)) + '</mark>';
+      i = hit.at + hit.t.length;
+    }
+    return out;
+  }
+
+  function renderList() {
+    const inp = input(), ul = list(), cnt = count();
+    if (!inp || !ul || !cnt) return;
+    const q = inp.value;
+    results = search(q);
+    active = Math.min(active, Math.max(0, results.length - 1));
+    let lastGroup = '';
+    ul.innerHTML = results
+      .map((e, i) => {
+        const head = e.group !== lastGroup ? `<li class="cmdk__group" role="presentation">${esc(e.group)}</li>` : '';
+        lastGroup = e.group;
+        const icon = e.kind === 'page' ? '▣' : e.kind === 'section' ? '#' : '⚡';
+        return `${head}<li class="cmdk__item" role="option" id="cmdk-opt-${i}" data-i="${i}" aria-selected="${i === active}"><span class="cmdk__kind mono">${icon}</span><span class="cmdk__title">${highlight(e.title, q)}</span></li>`;
+      })
+      .join('');
+    cnt.textContent = results.length ? `${results.length} result${results.length === 1 ? '' : 's'}` : 'no matches';
+    inp.setAttribute('aria-activedescendant', results.length ? `cmdk-opt-${active}` : '');
+    ul.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function open() {
+    const d = dialog(), inp = input();
+    if (!d || !inp || d.open) return;
+    d.showModal();
+    inp.value = '';
+    active = 0;
+    renderList();
+    load().then(renderList);
+    inp.focus();
+  }
+  function close() { const d = dialog(); if (d?.open) d.close(); }
+
+  function scrollToHash(hash: string, smooth = true) {
+    const el = document.getElementById(hash);
+    if (!el) return;
+    el.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'start' });
+  }
+
+  async function choose(e: Entry | undefined) {
+    if (!e) return;
+    close();
+    if (e.run) { e.run(); return; }
+    if (/^(https?:|mailto:)/.test(e.url)) { window.open(e.url, e.url.startsWith('mailto:') ? '_self' : '_blank', 'noopener'); return; }
+    if (e.url.endsWith('.pdf')) { window.location.href = e.url; return; }
+    const [path, hash] = e.url.split('#');
+    if (path === location.pathname && hash) {
+      scrollToHash(hash);
+      history.replaceState(null, '', `#${hash}`);
+      return;
+    }
+    await navigate(e.url);
+    // media above the target may still be sizing itself; settle on the heading once more
+    if (hash) { setTimeout(() => scrollToHash(hash, false), 60); setTimeout(() => scrollToHash(hash, false), 500); }
+  }
+
+  function bindPage() {
+    pageAbort = new AbortController();
+    const { signal } = pageAbort;
+    const d = dialog(), inp = input(), ul = list();
+    if (!d || !inp || !ul) return;
+    inp.addEventListener('input', () => { active = 0; renderList(); }, { signal });
+    inp.addEventListener('keydown', (ev) => {
+      const n = Math.max(1, results.length);
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); active = (active + 1) % n; renderList(); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); active = (active - 1 + n) % n; renderList(); }
+      else if (ev.key === 'Enter') { ev.preventDefault(); void choose(results[active]); }
+    }, { signal });
+    ul.addEventListener('click', (ev) => {
+      const li = (ev.target as Element).closest<HTMLElement>('.cmdk__item');
+      if (li) void choose(results[Number(li.dataset.i)]);
+    }, { signal });
+    ul.addEventListener('mousemove', (ev) => {
+      const li = (ev.target as Element).closest<HTMLElement>('.cmdk__item');
+      if (li && Number(li.dataset.i) !== active) { active = Number(li.dataset.i); renderList(); }
+    }, { signal });
+    d.addEventListener('click', (ev) => { if (ev.target === d) close(); }, { signal });
+  }
+
+  // Global listeners, registered once.
+  document.addEventListener('keydown', (ev) => {
+    const mod = ev.metaKey || ev.ctrlKey;
+    if (mod && ev.key.toLowerCase() === 'k') { ev.preventDefault(); dialog()?.open ? close() : open(); return; }
+    const typing = (ev.target as HTMLElement)?.closest?.('input, textarea, select, [contenteditable]');
+    if (ev.key === '/' && !mod && !typing && !dialog()?.open) { ev.preventDefault(); open(); }
+  });
+  document.addEventListener('click', (ev) => {
+    if ((ev.target as Element).closest('[data-open-palette]')) { ev.preventDefault(); open(); }
+  });
+  document.addEventListener('astro:page-load', bindPage);
+  document.addEventListener('astro:before-swap', () => { close(); pageAbort.abort(); });
+</script>
+
+<style is:global>
+  /* Global on purpose: the result rows are created at runtime and would miss scoped styles. */
+  .cmdk { border: 0; padding: 0; background: transparent; max-width: min(640px, calc(100vw - 32px)); width: 100%; margin: 12vh auto auto; color: var(--fg); }
+  .cmdk::backdrop { background: color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .cmdk__box { margin: 0; background: var(--bg-raised); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden; }
+  .cmdk__input-row { display: flex; align-items: center; gap: .7em; padding: .9em 1em; border-bottom: 1px solid var(--line); }
+  .cmdk__icon { width: 18px; height: 18px; fill: none; stroke: var(--fg-muted); stroke-width: 2; stroke-linecap: round; flex: none; }
+  .cmdk__input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--fg); font: inherit; font-size: 1.05rem; }
+  .cmdk__input::placeholder { color: var(--fg-faint); }
+  .cmdk__esc, .cmdk__foot kbd { font-family: var(--font-mono); font-size: .68rem; color: var(--fg-muted); border: 1px solid var(--line-strong); border-radius: 4px; padding: .1em .4em; background: var(--bg); }
+  .cmdk__list { list-style: none; margin: 0; padding: .4em; max-height: min(52vh, 460px); overflow-y: auto; scrollbar-width: thin; }
+  .cmdk__group { font-family: var(--font-mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-faint); padding: .7em .7em .3em; }
+  .cmdk__item { display: flex; align-items: center; gap: .7em; padding: .55em .7em; border-radius: var(--radius); cursor: pointer; color: var(--fg-muted); }
+  .cmdk__item[aria-selected="true"] { background: var(--accent-soft); color: var(--fg); }
+  .cmdk__kind { width: 1.2em; text-align: center; color: var(--fg-faint); font-size: .8rem; flex: none; }
+  .cmdk__item[aria-selected="true"] .cmdk__kind { color: var(--accent); }
+  .cmdk__title { font-size: .95rem; line-height: 1.35; }
+  .cmdk__title mark { background: transparent; color: var(--accent); font-weight: 600; }
+  .cmdk__foot { display: flex; gap: 1.2em; align-items: center; padding: .55em 1em; border-top: 1px solid var(--line); font-size: .72rem; color: var(--fg-faint); }
+  .cmdk__foot kbd { margin-right: .3em; }
+  .cmdk__count { margin-left: auto; }
+  @media (max-width: 540px) { .cmdk { margin-top: 6vh; } .cmdk__foot span:not(.cmdk__count) { display: none; } }
+</style>
