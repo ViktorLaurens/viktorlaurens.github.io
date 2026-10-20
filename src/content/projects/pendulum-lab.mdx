@@ -1,0 +1,95 @@
+---
+title: "Pendulum Lab"
+summary: "One system, four questions. A long-form study that takes the pendulum from first-principles modelling through classical and learning-based identification, Kalman filtering and an underactuated Furuta pendulum, on the way to control."
+date: 2026-10-01
+tags: [modelling, identification, estimation, learning, control]
+featured: true
+order: 1
+coverVideo: /media/pendulum-lab/phase_flow.mp4
+coverAlt: "Phase flow of the damped pendulum"
+---
+import Figure from '../../components/Figure.astro';
+
+<Figure video="/media/pendulum-lab/phase_flow.mp4" width={100} alt="Streamlines flowing along the pendulum vector field">
+
+Phase flow of the damped pendulum: every point of the plane is an initial condition $(\theta_0, \dot\theta_0)$.
+
+</Figure>
+
+## Why a pendulum
+
+A pendulum is the smallest system that has everything: a nonlinear equation with no
+closed-form solution, two kinds of equilibria, a real sensor with real outliers, and, in
+its Furuta form, fewer motors than degrees of freedom. Every tool of control engineering can
+be tried on it and judged against ground truth. This project does exactly that, one chapter
+at a time, with every figure and animation generated from the same code.
+
+## The storyline: one problem, four questions
+
+Every chapter works with the same model of the pendulum and its sensor, written per sample $k$:
+
+$$
+\mathbf x_{k+1} = \mathbf f(\mathbf x_k, p) + \mathbf w_k,
+\qquad
+y_k = \theta_k + b + v_k,
+\qquad
+\mathbf x_k = \begin{bmatrix} \theta_k \cr \dot\theta_k \end{bmatrix}.
+$$
+
+It contains four kinds of unknowns:
+
+| unknown | what it is | changes over time |
+|---|---|---|
+| $\mathbf f$ | the structure of the dynamics: which equation | no |
+| $p = (\omega_0^2, \mu, b)$ | the parameters | no |
+| $\mathbf x_k$ | the state: angle and angular velocity | every sample |
+| $\mathbf w_k$, $v_k$ | what the model and the sensor get wrong | random |
+
+Chapter 1 is the **forward problem**: given $\mathbf f$, $p$ and the initial state, compute
+the motion. Every later chapter is an **inverse problem**: given the measurements $y_k$,
+infer what is unknown. They all answer the same Bayesian question, *what do the data say
+about the unknowns?*, and they differ along three axes:
+
+1. **What is asked.** Constant unknowns (structure, parameters) are *identification*. Every
+   new sample adds information about them, so their uncertainty keeps shrinking. The state
+   is new at every sample: that is *state estimation*, and it is never finished.
+2. **Which data may be used.** *Offline*, after the experiment, the whole recording
+   $y_1, \dots, y_N$ is available, future samples included. *Online*, for example inside a
+   control loop, only $y_1, \dots, y_k$: the past and the present.
+3. **How much structure $\mathbf f$ has.** Known from physics, discovered from a library of
+   candidate terms, or a neural network learned from scratch.
+
+| | the state $\mathbf x_k$ | the parameters $p$ | both |
+|---|---|---|---|
+| **offline** | smoothing: the Savitzky–Golay derivative (2.2), the Rauch–Tung–Striebel smoother (5.8) | regression (2.2), output error (2.4), Bayesian inference (2.5), learning-based methods (3) | output error also estimates the initial state (2.4) |
+| **online** | filtering: Kalman filter, EKF, UKF (5.1 to 5.5, 5.7) | | the augmented EKF (5.6) |
+
+### How identification and state estimation connect
+
+Output error (2.4) treats the model as exact, $\mathbf w_k = 0$. Then the parameters and the
+initial state fix every later state, and estimating $\mathbf x_0$ *is* estimating the whole
+trajectory: identification and state estimation are one problem, and the states stay hidden
+inside it. State estimation (chapter 5) lets the model be imperfect, $\mathbf w_k \ne 0$.
+The model can then no longer carry the state forward on its own, and the state has to be
+re-estimated from the measurements at every sample.
+
+The two meet again inside the Kalman filter. Its innovations give the likelihood of the
+measurements for given parameters and noise levels (5.5); maximizing it is the
+*prediction-error method* of identification, and output error is its special case without
+process noise. Made part of the state, the parameters are identified online (5.6), and at the
+end of the recording the filter lands on the offline result of 2.4. Identification and state
+estimation are the same posterior, asked about different unknowns with different data.
+
+## What is still to come
+
+Chapters 7 and 8 are planned: **classical control** of the Furuta pendulum (LQR balancing,
+energy-based swing-up, model predictive control) and **reinforcement learning** (PPO and SAC
+in a MuJoCo + Gymnasium environment), both built on the model, the identified parameters and
+the state estimator from the chapters above.
+
+## How it was made
+
+Everything is Python. Physics, sensors, estimators and data loading live in one reusable
+package; scripts regenerate every static figure from frozen benchmark datasets that are
+committed and never edited by hand; the animations are Manim scenes that only draw, with all
+physics imported from the same package. Tests check the physics, the data and the report.

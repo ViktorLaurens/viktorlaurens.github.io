@@ -11,6 +11,9 @@ const { project } = Astro.props;
 const { Content, headings } = await render(project);
 const { title, summary, date, tags, repo } = project.data;
 const toc = headings.filter((h) => h.depth === 2);
+const chapters = (await getCollection('chapters', (c) => c.data.project === project.id))
+  .sort((a, b) => a.data.number - b.data.number);
+const chapterSlug = (id: string) => id.split('/').pop();
 ---
 <Base title={title} description={summary}>
   <article class="project container">
@@ -23,10 +26,36 @@ const toc = headings.filter((h) => h.depth === 2);
         {repo && <a class="btn btn--sm" href={repo} target="_blank" rel="noopener">View code →</a>}
       </div>
     </header>
+
+    {chapters.length > 0 && (
+      <section class="chapters" aria-labelledby="chapters-title">
+        <div class="section__head">
+          <h2 id="chapters-title">Chapters</h2>
+          <p class="eyebrow">{chapters.length} written · 2 planned</p>
+        </div>
+        <ol class="chapters__list">
+          {chapters.map((c) => (
+            <li>
+              <a class="chapter" href={`/projects/${project.id}/${chapterSlug(c.id)}/`}>
+                <span class="chapter__num mono">{String(c.data.number).padStart(2, '0')}</span>
+                <span class="chapter__body">
+                  <span class="chapter__title">{c.data.title}</span>
+                  <span class="chapter__summary">{c.data.summary}</span>
+                </span>
+                <span class="chapter__arrow" aria-hidden="true">→</span>
+              </a>
+            </li>
+          ))}
+          <li class="chapter chapter--planned"><span class="chapter__num mono">07</span><span class="chapter__body"><span class="chapter__title">Classical control</span><span class="chapter__summary">LQR balancing, energy-based swing-up, MPC. Planned.</span></span></li>
+          <li class="chapter chapter--planned"><span class="chapter__num mono">08</span><span class="chapter__body"><span class="chapter__title">Reinforcement learning</span><span class="chapter__summary">PPO and SAC in a MuJoCo + Gymnasium environment. Planned.</span></span></li>
+        </ol>
+      </section>
+    )}
+
     <div class="project__body">
       {toc.length > 1 && (
         <nav class="toc" aria-label="On this page">
-          <p class="eyebrow">Contents</p>
+          <p class="eyebrow">On this page</p>
           <ol>
             {toc.map((h) => <li><a href={`#${h.slug}`}>{h.text}</a></li>)}
           </ol>
@@ -43,11 +72,24 @@ const toc = headings.filter((h) => h.depth === 2);
   .project { padding-block: var(--space-12); }
   .project__head { display: grid; gap: var(--space-4); max-width: 60rem; margin-bottom: var(--space-12); }
   .project__meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-2); }
-  .project__body { display: grid; gap: var(--space-12); align-items: start; }
+  .chapters { margin-bottom: var(--space-16); }
+  .chapters__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+  .chapter { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: var(--space-4); align-items: center; padding: var(--space-4) var(--space-5, 1.25rem); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); text-decoration: none; color: inherit; transition: border-color .2s var(--ease), transform .2s var(--ease); }
+  a.chapter:hover { border-color: var(--accent); transform: translateX(3px); color: inherit; }
+  a.chapter:hover .chapter__title, a.chapter:hover .chapter__arrow { color: var(--accent); }
+  .chapter__num { font-size: 1.4rem; color: var(--fg-faint); }
+  .chapter__body { display: grid; gap: .15em; }
+  .chapter__title { font-weight: 600; font-size: 1.05rem; }
+  .chapter__summary { color: var(--fg-muted); font-size: .92rem; line-height: 1.45; }
+  .chapter__arrow { color: var(--fg-faint); font-size: 1.2rem; }
+  .chapter--planned { opacity: .55; border-style: dashed; }
+  .project__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-12); align-items: start; }
+  .project__body > * { min-width: 0; }
   @media (min-width: 1024px) { .project__body { grid-template-columns: 220px minmax(0, 1fr); } }
   .toc { position: sticky; top: 88px; font-size: .9rem; }
   .toc ol { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: .4em; border-left: 1px solid var(--line); }
   .toc a { display: block; padding: .15em 0 .15em .9em; color: var(--fg-muted); text-decoration: none; border-left: 1.5px solid transparent; margin-left: -1px; }
   .toc a:hover { color: var(--fg); border-left-color: var(--accent); }
   @media (max-width: 1023px) { .toc { position: static; } }
+  @media (max-width: 540px) { .chapter { grid-template-columns: 2.2rem minmax(0, 1fr); } .chapter__arrow { display: none; } .chapter__num { font-size: 1.1rem; } }
 </style>

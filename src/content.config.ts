@@ -2,7 +2,7 @@ import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
 
 const projects = defineCollection({
-  loader: glob({ pattern: '**/*.mdx', base: './src/content/projects' }),
+  loader: glob({ pattern: '*.mdx', base: './src/content/projects' }),
   schema: ({ image }) =>
     z.object({
       title: z.string(),
@@ -14,7 +14,19 @@ const projects = defineCollection({
       repo: z.string().url().optional(),
       cover: image().optional(),
       coverAlt: z.string().optional(),
+      coverVideo: z.string().optional(),
     }),
 });
 
-export const collections = { projects };
+/** Long-form projects are split into chapters: src/content/chapters/<project>/<chapter>.mdx */
+const chapters = defineCollection({
+  loader: glob({ pattern: '*/*.mdx', base: './src/content/chapters' }),
+  schema: z.object({
+    project: z.string(),
+    number: z.number(),
+    title: z.string(),
+    summary: z.string(),
+  }),
+});
+
+export const collections = { projects, chapters };

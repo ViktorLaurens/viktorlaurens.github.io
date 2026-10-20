@@ -1,0 +1,869 @@
+---
+project: pendulum-lab
+number: 5
+title: "State estimation"
+summary: "Real-time estimates from angle measurements: Kalman, extended and unscented filters, outlier gating, consistency, online parameters and the RTS smoother."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapters 2 to 4 identified the pendulum *after* the experiment, using the whole recording at
+once. Even the Savitzky–Golay derivative of section 2.2 used samples from the future: its
+window is centered on the sample it estimates. A controller cannot work that way. At every
+sample of a $100\ \text{Hz}$ control loop it needs the full state $(\theta, \dot\theta)$
+**now**, from past measurements only, while the sensor measures only $\theta$. Estimating
+the state in real time is the subject of this chapter, and the bridge to the control
+chapters that follow.
+
+There is a second difference. Output error (2.4) trusted the model completely: given the
+parameters and the initial state, the simulation fixes every later state, so estimating the
+initial state was estimating them all. Here the model is allowed to be imperfect, through a
+random *process noise*. The model can then no longer carry the state forward on its own, and
+the state has to be re-estimated from the measurements at every sample. The two views meet
+again in sections 5.5 and 5.6, where the filter turns out to be an identification method as
+well (see the [storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)).
+
+The code is in `src/pendulum_lab/kalman.py`; the numbers come
+from `scripts/evaluate_kalman.py`.
+
+## 5.1 The problem: real-time estimates from angle measurements
+
+### Model-free attempts
+
+The obvious causal estimate of the velocity is the backward difference
+$\dot\theta_k \approx \tfrac{y_k - y_{k-1}}{h}$. Its noise is
+$\tfrac{\sqrt 2\thinspace\sigma}{h} = 1.31\ \text{rad/s}$ for the Gaussian part of the sensor
+noise alone, larger than the velocity itself on the small swing. Smoothing the differences
+over time, for example with an exponential average
+$\hat v_k = \hat v_{k-1} + \alpha\left(\tfrac{y_k - y_{k-1}}{h} - \hat v_{k-1}\right)$, trades
+noise for **lag**: a causal smoother can only average the past, so its estimate trails the
+truth.
+
+<Figure src="/media/pendulum-lab/causal_estimates.png" width={100} alt="Backward differences scatter far around the true velocity; exponential smoothing follows it with visible lag and spikes at outliers">
+
+Small-swing recording; exponential smoothing with $\alpha = 0.1$
+
+</Figure>
+
+| Causal estimate of $\dot\theta$ (small swing, $t \ge 2\ \text{s}$, outliers included) | RMS error |
+|---|---|
+| Backward difference | $5.26\ \text{rad/s}$ |
+| Exponential smoothing, $\alpha = 0.1$ | $0.39\ \text{rad/s}$ |
+| Exponential smoothing, $\alpha = 0.03$ | $0.27\ \text{rad/s}$ |
+
+Without a model, every causal estimator is stuck between noise and lag. The way out is to
+use what we learned in chapter 2: **how the pendulum moves.**
+
+### Recursive Bayesian estimation
+
+Section 2.5 computed a posterior from the whole recording at once. Here we want the
+posterior of the *current* state given the measurements *so far*, updated as each sample
+arrives. Two steps alternate:
+
+1. **Predict.** Before measurement $k$ arrives, the model carries the belief about the
+   state forward by one sample. The belief becomes less certain, because the model is not
+   perfect.
+2. **Update.** Measurement $y_k$ arrives and corrects the belief, weighted by how much we
+   trust the sensor compared with the prediction.
+
+The **Kalman filter** carries out these two steps exactly when the model is linear and all
+uncertainty is Gaussian: then the belief stays Gaussian forever, and a mean and a
+covariance describe it completely.
+
+## 5.2 The Kalman filter
+
+### The model, in discrete time
+
+For small angles the pendulum is linear (chapter 1): with state
+$\mathbf x = (\theta, \dot\theta)$,
+
+$$
+\dot{\mathbf x} = A\mathbf x, \qquad
+A = \begin{bmatrix} 0 & 1 \cr -\omega_0^2 & -\mu \end{bmatrix}.
+$$
+
+Between two samples, $h = 0.01\ \text{s}$ apart, this moves the state exactly by the matrix
+exponential, $\mathbf x_{k+1} = F\mathbf x_k$ with $F = e^{Ah}$. To this we add **process
+noise** $\mathbf w_k$ with covariance $Q$, which stands for everything the model leaves out,
+and the measurement equation from section 2.1:
+
+$$
+\mathbf x_{k+1} = F\mathbf x_k + \mathbf w_k,
+\qquad
+y_k = H\mathbf x_k + b + v_k,
+\qquad H = \begin{bmatrix} 1 & 0 \end{bmatrix},
+\quad v_k \sim \mathcal N(0, R).
+$$
+
+All model parameters come from identification. We identify once (section 2.4) and then
+filter online: $\omega_0^2$, $\mu$ and $b$ are the robust output-error estimates from the
+same recording, and $R = \hat\sigma^2$ with $\hat\sigma = 0.53^\circ$ from the noise estimate
+of section 2.4.
+
+**Process noise from physics.** We model the error as a random, white-noise acceleration
+with spectral density $q$. Over one sample it disturbs both angle and velocity, in a
+correlated way:
+
+$$
+Q = q \begin{bmatrix} \tfrac{1}{3}h^3 & \tfrac{1}{2}h^2 \cr \tfrac{1}{2}h^2 & h \end{bmatrix}.
+$$
+
+Its size follows from what the model ignores. On the small swing ($20^\circ$) the
+linearization error $\omega_0^2(\theta - \sin\theta)$ is at most about $0.07\ \text{rad/s}^2$,
+so an acceleration of about $0.1\ \text{rad/s}^2$ per sample gives $q = 10^{-4}$. Section 5.5
+examines what happens when $q$ is chosen wrongly.
+
+### The filter
+
+With the belief about $\mathbf x_k$ written as mean $\hat{\mathbf x}$ and covariance $P$,
+each sample performs:
+
+$$
+\text{predict:}\qquad
+\hat{\mathbf x}^- = F\hat{\mathbf x}, \qquad P^- = FPF^\top + Q,
+$$
+
+$$
+\text{update:}\qquad
+S = HP^-H^\top + R, \qquad
+K = P^-H^\top S^{-1}, \qquad
+\hat{\mathbf x} = \hat{\mathbf x}^- + K\big(y_k - b - H\hat{\mathbf x}^-\big), \qquad
+P = (I - KH)P^- .
+$$
+
+The **innovation** $y_k - b - H\hat{\mathbf x}^-$ is the surprise: how far the measurement is
+from what the model predicted. The **Kalman gain** $K$ decides how much of that surprise to
+believe. It is large when the prediction is uncertain ($P^-$ large) and small when the
+sensor is noisy ($R$ large).
+
+The update only *measures* the angle, yet it improves the velocity estimate too. The reason
+is the correlation that the prediction step creates. A belief that is certain about the
+angle but not about the velocity is a tall, thin region in the phase plane. One sample
+later, states with higher velocity have moved further: the region **shears** into a tilted
+one, in which angle and velocity are correlated. The next angle measurement then cuts
+through that tilted region and narrows the velocity as well.
+
+<Figure video="/media/pendulum-lab/kalman_predict_update.mp4" width={100} alt="The belief in the phase plane: an update collapses it to a thin vertical band, a prediction shears it into a tilted ellipse, and the next update narrows the velocity">
+
+The first samples of the small-swing recording, with a deliberately uncertain start
+
+</Figure>
+
+### Results on the small swing
+
+The filter starts from the first measurement with an uninformed velocity
+($\sigma_{\dot\theta} = 2\ \text{rad/s}$). Its uncertainty and gain settle within about
+$0.8\ \text{s}$ to constant values. Those are the solution of the **discrete algebraic Riccati
+equation**, $P^- = F\left(P^- - P^-H^\top S^{-1}HP^-\right)F^\top + Q$, which our tests check:
+
+<Figure src="/media/pendulum-lab/kalman_convergence.png" width={100} alt="The estimate's standard deviations and the Kalman gains decrease during the first second and settle at the Riccati steady state">
+
+Small-swing recording; dashed: the steady state from the Riccati equation
+
+</Figure>
+
+After that, the Kalman filter is just a fixed linear filter with gain
+$K = (0.0285,\ 0.0413)$. The difference from the smoothing of section 5.1 is that its
+prediction step runs the pendulum model, so it does not lag.
+
+<Figure src="/media/pendulum-lab/kalman_small_swing.png" width={100} alt="The Kalman velocity estimate lies on the true velocity; its error stays within the filter's band except after outliers">
+
+Top: velocity on the small swing. Bottom: the filter's error and its own $\pm 2\sigma$ band; red lines mark outliers
+
+</Figure>
+
+| Estimate of $\dot\theta$ (small swing, $t \ge 2\ \text{s}$) | RMS error |
+|---|---|
+| Exponential smoothing, best $\alpha$ | $0.27\ \text{rad/s}$ |
+| Kalman filter | $0.0136\ \text{rad/s}$ |
+| Kalman filter's own claim, $\sigma_{\dot\theta}$ | $0.0060\ \text{rad/s}$ |
+| Kalman filter, away from outliers | $0.0054\ \text{rad/s}$ |
+
+The Kalman filter is **20 times more accurate** than the best smoothing, and it computes
+each estimate in about $13\ \mu\text{s}$ in plain Python, far within the
+$10\ \text{ms}$ of a $100\ \text{Hz}$ loop.
+
+Its error is, however, more than twice what the filter claims. The bottom panel shows why:
+every outlier is taken at face value, kicks the estimate out of its band, and the error
+decays only over about half a second. Away from outliers the error ($0.0054$) matches the
+filter's own uncertainty ($0.0060$). The filter assumes Gaussian noise; section 5.4 teaches
+it to recognize measurements that are too surprising to be true.
+
+### What we learned
+
+- Without a model, a real-time estimate must trade noise for lag. A Kalman filter uses the
+  dynamics to escape that trade-off.
+- Each sample alternates predict and update; the gain weighs the model against the sensor.
+- An angle sensor reveals the velocity through the correlation that the dynamics create
+  between angle and velocity.
+- For a linear model the filter settles to a fixed gain, given by the Riccati equation.
+- One assumption is already failing: the noise is not Gaussian.
+
+## 5.3 The extended Kalman filter
+
+On the small swing the linear model was good enough. On the reference recording, released
+from $120^\circ$, it is not: chapter 1 showed that at this amplitude the real period is 37%
+longer than the small-angle model predicts.
+
+### Linearize where you are
+
+The **extended Kalman filter** (EKF) keeps the nonlinear model wherever it can. The predicted
+estimate follows the true equation of motion, integrated over one sample with a fourth-order
+Runge–Kutta step:
+
+$$
+\hat{\mathbf x}^- = \hat{\mathbf x} + \int_{t_k}^{t_k + h} \mathbf f(\mathbf x)\thinspace dt,
+\qquad
+\mathbf f(\mathbf x) = \begin{bmatrix} \dot\theta \cr -\omega_0^2\sin\theta - \mu\dot\theta \end{bmatrix}.
+$$
+
+Only the covariance needs a linear model, and the EKF linearizes *around the current
+estimate*. That linearization is the Jacobian from the fixed-point analysis of chapter 1,
+now evaluated wherever the pendulum happens to be rather than at an equilibrium:
+
+$$
+A(\hat{\mathbf x}) = \frac{\partial\mathbf f}{\partial\mathbf x}\bigg|_{\hat{\mathbf x}}
+= \begin{bmatrix} 0 & 1 \cr -\omega_0^2\cos\hat\theta & -\mu \end{bmatrix},
+\qquad
+F_k = e^{A(\hat{\mathbf x})h},
+\qquad
+P^- = F_k P F_k^\top + Q .
+$$
+
+The measurement $y_k = \theta_k + b + v_k$ is already linear, so the update step is exactly
+that of section 5.2. Near the bottom, $\cos\hat\theta \approx 1$ and the EKF *is* the linear
+filter; at $120^\circ$, $\cos\hat\theta = -0.5$ and the local dynamics are completely different.
+
+### Results on the large swing
+
+Both filters use the identified parameters and the same process noise as before; only the
+model differs.
+
+<Figure video="/media/pendulum-lab/ekf_pendulum.mp4" width={100} alt="The true pendulum, the extended filter's estimate on top of it, and the linear filter's estimate drifting ahead and behind; on the right the velocity curves">
+
+Reference recording, first 6 s
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/ekf_reference.png" width={100} alt="Velocity estimates of both filters, and their actual errors against the uncertainty they claim, on a logarithmic scale">
+
+Reference recording. Bottom: actual error (solid) and the filter's own standard deviation (dashed)
+
+</Figure>
+
+| $\dot\theta$ on the reference ($t \ge 2\ \text{s}$) | RMS error | largest error | filter's claim $\sigma_{\dot\theta}$ |
+|---|---|---|---|
+| Linear Kalman filter | $0.417\ \text{rad/s}$ | $1.71\ \text{rad/s}$ | $0.0060\ \text{rad/s}$ |
+| Extended Kalman filter | $0.0119\ \text{rad/s}$ | $0.062\ \text{rad/s}$ | $0.0060\ \text{rad/s}$ |
+| Savitzky–Golay of section 2.2 (*non-causal*) | $0.062\ \text{rad/s}$ | | |
+
+The linear filter's estimated swing is too large and runs ahead of the real one, and its angle
+error reaches $5.8^\circ$ RMS. Worse, it *claims* the same small uncertainty as the EKF: its
+actual error is 70 times larger than what it reports. **A wrong model does not make a
+Kalman filter uncertain, it makes it wrong and confident.** Its error shrinks as the swing
+decays, because its model becomes valid again: the failure is the model's, not the filter's.
+
+The EKF tracks the large swing as well as the linear filter tracked the small one; away from
+outliers its error ($0.0059\ \text{rad/s}$) again matches its claimed uncertainty. It is even
+five times more accurate than the Savitzky–Golay derivative of chapter 2, which used future
+samples: **a model of the dynamics is worth more than knowing the future measurements.**
+On the small swing both filters perform alike, as they should. The EKF costs about
+$35\ \mu\text{s}$ per sample, three times the linear filter, mostly for the matrix
+exponential that is now recomputed at every step.
+
+### What we learned
+
+- The EKF follows the nonlinear model for the estimate and linearizes it, around the current
+  estimate, only for the covariance.
+- With the wrong model a Kalman filter fails silently: its error bars stay small while its
+  estimate is far off. Consistency checks (section 5.5) are how such failures are found.
+- A causal filter with a good model beats a non-causal estimate without one.
+
+## 5.4 Outliers and innovation gating
+
+The sensor of chapter 2 occasionally returns a reading that is wildly wrong: 28 times in the
+20 s of the reference recording, by $1.7^\circ$ to $36^\circ$. A Kalman filter has no notion of
+an outlier. It weighs every measurement by the same gain, so each spike pulls the estimate
+off and the error of the EKF in section 5.3 is dominated by these moments: $0.0059\ \text{rad/s}$
+away from outliers, $0.0119\ \text{rad/s}$ overall.
+
+### The filter already knows what to expect
+
+Before each update the filter predicts the measurement, $\hat y_k = \hat\theta^-_k + b$, and
+its uncertainty, $S_k = H P^-_k H^\top + R$. The **innovation** $\nu_k = y_k - \hat y_k$ is the
+surprise. If the filter's model is right, $\nu_k$ is Gaussian with variance $S_k$, so the
+normalized innovation squared
+
+$$
+d_k^2 = \frac{\nu_k^2}{S_k}
+$$
+
+follows a $\chi^2$ distribution with one degree of freedom. That gives a test for free:
+**if $d_k^2 \gt \gamma$, skip the update** and keep the prediction. With $\gamma = 9$ a
+measurement is rejected when it lies more than $3\sqrt{S_k}$ from the prediction, which for
+a correct filter happens to only 0.27% of good measurements. On the reference
+$\sqrt{S_k} \approx 0.54^\circ$, so the gate is about $\pm 1.6^\circ$ wide. This costs one
+comparison per sample and is how almost every practical Kalman filter handles outliers.
+
+<Figure video="/media/pendulum-lab/gating_innovations.mp4" width={100} alt="Innovations of the gated filter appearing one by one inside a narrow gate band; three outliers fall outside and are rejected; below, the velocity error of the ungated filter jumps at each outlier while the gated one stays flat">
+
+Reference recording, 8.3 s to 9.4 s, ten times slowed down. Triangles mark innovations off the scale
+
+</Figure>
+
+### Results
+
+<Figure src="/media/pendulum-lab/gating_reference.png" width={100} alt="Top: normalized innovation per sample on a logarithmic scale with the gate at 9; all outliers lie above it. Bottom: the velocity error with and without gating against the filter's own standard deviation">
+
+Reference recording, EKF with $\gamma = 9$. Bottom: red lines mark the outliers
+
+</Figure>
+
+| EKF on the reference ($t \ge 2\ \text{s}$) | outliers rejected | good samples rejected | $\dot\theta$ RMS error | largest error |
+|---|---|---|---|---|
+| no gate | 0 of 28 | 0 | $0.0119\ \text{rad/s}$ | $0.062\ \text{rad/s}$ |
+| $\gamma = 4$ ($2\sqrt{S}$) | 28 of 28 | 56 | $0.0029\ \text{rad/s}$ | $0.0091\ \text{rad/s}$ |
+| $\gamma = 9$ ($3\sqrt{S}$) | 28 of 28 | 0 | $0.0030\ \text{rad/s}$ | $0.0100\ \text{rad/s}$ |
+| $\gamma = 16$ ($4\sqrt{S}$) | 27 of 28 | 0 | $0.0030\ \text{rad/s}$ | $0.0098\ \text{rad/s}$ |
+| $\gamma = 100$ ($10\sqrt{S}$) | 22 of 28 | 0 | $0.0030\ \text{rad/s}$ | $0.0096\ \text{rad/s}$ |
+
+With $\gamma = 9$ every outlier is caught without a single false alarm, and the error drops
+four times, to $0.0030\ \text{rad/s}$. That is *below* the $0.0059\ \text{rad/s}$ measured away
+from outliers in section 5.3: an outlier does not only cause a spike, the filter needs the
+better part of a second to forget it.
+
+The result is remarkably insensitive to $\gamma$. A tight gate wastes a few good samples, a
+loose gate lets the small outliers through ($\gamma = 100$ misses the six below $5^\circ$),
+but the small ones barely matter. Two numbers hint at a problem for the next section, though.
+The gated filter's actual error is now within its own $2\sigma$ at every sample after the start-up, and the gate
+fires *less* often on good data than the $\chi^2$ distribution predicts (0 instead of about 5
+at $\gamma = 9$, 56 instead of about 90 at $\gamma = 4$). Both say the same thing: the filter's
+uncertainty is now too large. The process noise $q$ was chosen in section 5.2 to cover the
+linearization error of the *linear* model; the EKF and the gate no longer need that much.
+
+### The danger: locking out
+
+The gate trusts the filter's own prediction to judge the measurements. If that prediction is
+wrong *and* confident, the gate rejects exactly the measurements that would correct it. To
+show this, start the EKF $10^\circ$ off while claiming an uncertainty of $0.1^\circ$:
+
+<Figure src="/media/pendulum-lab/gating_lockout.png" width={100} alt="Angle error over time for a confident wrong start: the ungated filter recovers within a second, the gated filter stays off by up to 23 degrees for 15 seconds">
+
+Reference recording, EKF started $10^\circ$ off with a claimed $\sigma_\theta = 0.1^\circ$
+
+</Figure>
+
+Without a gate the filter is within $1^\circ$ after $1.2\ \text{s}$. With $\gamma = 9$ it rejects
+1400 of the 2000 measurements: every disagreement looks like an outlier, and it only accepts a
+measurement when its wrong trajectory happens to cross the true one. It is still $12^\circ$ off
+at $t = 5\ \text{s}$ and only recovers for good after $15.5\ \text{s}$, once the swing has decayed
+enough for the two trajectories to meet. Practical safeguards are an honest initial
+covariance, a start-up period without gating, and a reset when many consecutive samples are
+rejected; a long run of rejections is never "a lot of outliers", it is a lost filter.
+
+### What we learned
+
+- The innovation and its predicted variance give every Kalman filter a built-in outlier test:
+  reject a measurement when $\nu_k^2 \gt \gamma S_k$.
+- On the reference a $3\sqrt{S}$ gate rejects all 28 outliers and nothing else, and reduces the
+  velocity error four times. The exact threshold matters little.
+- The gate is only as good as the filter's own uncertainty: a confident, wrong filter locks
+  itself out. And how often the gate fires on clean data is already a consistency test.
+
+## 5.5 Consistency and tuning the noise
+
+A Kalman filter reports two things: an estimate, and how uncertain it is. Section 5.3 showed
+a filter that was wrong and confident; section 5.4 ended with one that is now *too modest*.
+Both numbers matter: the gate of section 5.4, a controller, or a fault detector downstream
+all act on the reported uncertainty. A filter whose uncertainty matches its actual errors is
+called **consistent**. The filter has only two knobs that set its uncertainty: the
+measurement noise $R$ and the process noise $q$. Until now both were set by reasoning, not
+by checking.
+
+### Two tests
+
+**With the truth** (only in simulation, or here because the frozen data were recorded with
+it), the normalized estimation error squared (NEES)
+
+$$
+\epsilon_k = \mathbf e_k^\top P_k^{-1} \mathbf e_k,
+\qquad
+\mathbf e_k = \mathbf x_k - \hat{\mathbf x}_k,
+$$
+
+follows a $\chi^2$ distribution with 2 degrees of freedom, so its mean should be 2. Below 2
+the filter is underconfident, above 2 overconfident.
+
+**Without the truth**, only the innovations of section 5.4 are available. Their normalized
+squares $d_k^2 = \tfrac{\nu_k^2}{S_k}$ (the NIS, normalized innovation squared) should average 1, and if $\nu_k$ really is Gaussian with
+variance $S_k$, the product of these Gaussians is the likelihood of the measurements:
+
+$$
+\log p(y_1, \dots, y_N) = -\frac{1}{2} \sum_k \left( \log 2\pi S_k + \frac{\nu_k^2}{S_k} \right).
+$$
+
+This is the same output-error idea as section 2.4, now evaluated by the filter itself.
+
+### The innovations calibrate $R$
+
+The gated EKF of section 5.4 has a mean NIS of $0.86$: its innovations are smaller than it
+expects. The innovation variance has two parts, $S_k = H P^-_k H^\top + R$, and here the first
+is only about 3% of $S_k$: one step ahead, the filter predicts the angle far better than the
+sensor measures it. So the NIS checks almost only $R$, and the innovations themselves give
+a better estimate of it, $R = \overline{\nu_k^2} - \overline{H P^-_k H^\top}$:
+
+| noise level of the sensor, $\hat\sigma = \sqrt{R}$ | |
+|---|---|
+| from second differences (section 2.1, used so far) | $0.532^\circ$ |
+| from the innovations | $0.493^\circ$ |
+| true value | $0.500^\circ$ |
+
+The second-difference estimate is model-free, but it is a robust estimate from a median, which
+makes it noisy, and outliers spill into three second differences each. The filter, which
+knows the dynamics, does better. With this $R$ the mean NIS is $1.000$.
+
+### $q$ is invisible to the NIS
+
+For $q$ the same test fails. Across five decades of $q$ the mean NIS stays between $0.99$ and
+$1.01$, because $q$ only changes the small $H P^- H^\top$ part of $S_k$. The truth is not
+indifferent at all:
+
+<Figure src="/media/pendulum-lab/consistency_sweep.png" width={100} alt="Four panels against the process noise q on a log scale: the mean NIS is flat at 1; the log-likelihood is flat for small q and drops beyond a few times 10 to the minus 6; the mean NEES falls from 40 to about 1 and crosses 2 near 2 times 10 to the minus 6; the actual velocity error grows with q while the filter's own sigma grows faster">
+
+Reference recording, gated EKF ($\gamma = 9$), $R$ from the innovations. Yellow line: the chosen $q$; teal line: $q$ of sections 5.2 to 5.4
+
+</Figure>
+
+The NEES (bottom left) crosses 2 at about $q = 2 \cdot 10^{-6}$; at the $q = 10^{-4}$ of
+sections 5.2 to 5.4 it is about 1, which is what an angle error matching its uncertainty and a
+velocity error far *below* its uncertainty add up to. The bottom right panel shows the price:
+the filter's own $\sigma_{\dot\theta}$ is twice its actual error, and the actual error itself
+is 60% larger than after tuning, because a large $q$ makes the filter follow the noisy
+measurements instead of its good model.
+
+The likelihood (top right) is the one measurement-only test that sees $q$. It does not
+pick a single value: it is flat for small $q$, because the data cannot tell a tiny $q$ from
+zero, and it drops clearly once $q$ is too large. A rule that follows from this is to **take
+the largest $q$ that the data cannot distinguish from the best**, the point where the
+log-likelihood has dropped by $1.92$ (a 95% likelihood-ratio interval). Larger is the safe
+side: section 5.4 showed what an overconfident filter does with a gate. On the reference this
+gives $q = 2.6 \cdot 10^{-6}$, chosen without the truth, and it lands right next to the
+NEES-consistent value.
+
+### Results
+
+<Figure video="/media/pendulum-lab/consistency_ellipses.mp4" width={100} alt="Three phase-plane panels with the estimation error moving as a dot: with q too small it keeps leaving a tiny ellipse; tuned, it stays inside an ellipse that just fits; with q too large, it stays near the centre of an ellipse far larger than needed">
+
+Reference recording, $t = 2$ to $10\ \text{s}$, real time. The fraction counts the samples whose error lay inside the 95% region
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/consistency_tuned.png" width={100} alt="Velocity error against the filter's own two-sigma band: before tuning the band is twice as wide as needed; after tuning the band hugs a smaller, smooth error">
+
+Reference recording, gated EKF ($\gamma = 9$)
+
+</Figure>
+
+| gated EKF on the reference ($t \ge 2\ \text{s}$) | mean NIS | mean NEES | $\dot\theta$ RMS error | largest error | own $\sigma_{\dot\theta}$ |
+|---|---|---|---|---|---|
+| section 5.4: $q = 10^{-4}$, $R$ from second differences | 0.86 | 0.86 | $0.0030\ \text{rad/s}$ | $0.0100\ \text{rad/s}$ | $0.0060\ \text{rad/s}$ |
+| $q = 10^{-8}$ (too small) | 1.01 | 39.9 | $0.0017\ \text{rad/s}$ | $0.0032\ \text{rad/s}$ | $0.0004\ \text{rad/s}$ |
+| **tuned:** $q = 2.6 \cdot 10^{-6}$, $R$ from the innovations | 1.00 | 1.80 | $0.0019\ \text{rad/s}$ | $0.0041\ \text{rad/s}$ | $0.0018\ \text{rad/s}$ |
+
+Tuning lowers the velocity error by 37%, to $0.0019\ \text{rad/s}$, and the filter's own
+$\sigma$ now matches it: its 95% region is eight times smaller in area and still contains the
+error 99.8% of the time. A $q$ that is too small is barely more accurate but claims an
+uncertainty four times smaller than its error, and the error leaves its 95% region most of the
+time. On the small swing the same procedure, again without the truth, gives
+$q = 6.5 \cdot 10^{-6}$ and the same improvement, from $0.0030$ to $0.0018\ \text{rad/s}$.
+
+The bottom panel above is also a warning. What is left of the error is no longer noise: it
+oscillates with the pendulum. That is the signature of a model error, here from the
+identified parameters being very slightly off.
+
+### The price of a small $q$
+
+$q$ is not only noise in the physics: it is the filter's margin for everything its model
+gets wrong. To see what that margin is worth, run both filters with $\omega_0^2$ only 1% too
+large:
+
+<Figure src="/media/pendulum-lab/consistency_model_error.png" width={100} alt="With a 1 percent error in omega0 squared, the tuned filter's running NIS rises to about 3 and its velocity error grows to 0.17 rad/s; the filter with the larger q has a running NIS near 1.3 and an error ten times smaller">
+
+Reference recording, $R$ from the innovations, $\gamma = 9$. Top: NIS of the accepted samples, averaged over 1 s
+
+</Figure>
+
+| $\omega_0^2$ 1% too large | mean NIS | $\dot\theta$ RMS error | measurements rejected |
+|---|---|---|---|
+| tuned $q = 2.6 \cdot 10^{-6}$ | 3.12 | $0.103\ \text{rad/s}$ | 1004 of 2000 |
+| $q = 10^{-4}$ | 1.21 | $0.021\ \text{rad/s}$ | 38 of 2000 |
+
+The tuned filter trusts its model so much that it rejects half of the measurements and its
+error grows fifty times. The filter with the larger $q$ degrades far more gracefully. Two
+things save the situation. First, the innovations see the problem even without the truth: a
+mean NIS of 3 is unmistakable, so **monitoring the NIS online** is how a deployed filter
+knows it has lost its model. Second, the honest fix for a model error is not a larger $q$, it
+is a better model, which is the subject of the next section.
+
+### What we learned
+
+- A filter is consistent when its reported uncertainty matches its actual errors: mean NEES 2
+  (needs the truth), mean NIS 1 (needs only the measurements).
+- Here the NIS calibrates $R$, but it cannot see $q$: one step ahead, the prediction is much
+  more precise than the sensor. The innovation likelihood can, and its flat region gives a
+  rule: the largest $q$ the data cannot distinguish from the best.
+- Tuned this way, the gated EKF is 37% more accurate and honest about it, but it relies on its
+  model: with a 1% parameter error it loses track. The running NIS shows that immediately.
+
+## 5.6 Estimating the parameters online
+
+Every filter so far borrowed its model from chapter 2: identify offline on the whole
+recording, then filter. Section 5.5 showed how much depends on that model: 1% off in
+$\omega_0^2$ and the tuned filter lost track. The Kalman filter can also learn the model
+itself, from the same measurements, while it runs.
+
+### Parameters as states
+
+The trick is to treat the unknown parameters as states that do not move. The augmented
+state is
+
+$$
+\mathbf z = \begin{bmatrix} \theta & \dot\theta & \omega_0^2 & \mu & b \end{bmatrix}^\top,
+\qquad
+\dot{\mathbf z} = \begin{bmatrix} \dot\theta \cr -\omega_0^2\sin\theta - \mu\dot\theta \cr 0 \cr 0 \cr 0 \end{bmatrix},
+\qquad
+y_k = \theta_k + b + v_k .
+$$
+
+The parameters enter the dynamics nonlinearly ($\omega_0^2$ multiplies $\sin\theta$), so this
+is an EKF even for small angles. Its Jacobian gains two columns that say how a parameter
+error turns into an acceleration error:
+
+$$
+A(\hat{\mathbf z}) = \begin{bmatrix}
+0 & 1 & 0 & 0 & 0 \cr
+-\hat\omega_0^2\cos\hat\theta & -\hat\mu & -\sin\hat\theta & -\hat{\dot\theta} & 0 \cr
+0 & 0 & 0 & 0 & 0 \cr
+0 & 0 & 0 & 0 & 0 \cr
+0 & 0 & 0 & 0 & 0
+\end{bmatrix},
+\qquad
+H = \begin{bmatrix} 1 & 0 & 0 & 0 & 1 \end{bmatrix}.
+$$
+
+Nothing else changes: predict, update, gate. The parameters are never measured; they are
+corrected through their covariance with the angle. That covariance builds up during the
+prediction: a larger $\omega_0^2$ makes the pendulum swing back sooner, a larger $\mu$ makes
+it lose amplitude, and a larger $b$ shifts every measurement. Every innovation therefore
+says a little about each of them.
+
+To make the test honest, the filter starts **without chapter 2**: $\omega_0^2 = 8 \pm 3$
+(a pendulum length guessed at about $1.2\ \text{m}$), $\mu = 0 \pm 0.5$, $b = 0 \pm 5^\circ$, with
+$R$ from second differences and $q$ from section 5.5.
+
+### Results
+
+<Figure video="/media/pendulum-lab/online_parameters.mp4" width={100} alt="The true pendulum and a model pendulum running the parameters learned so far; at first the model swings out of step, after about a second it locks on; on the right the three parameter estimates converge onto their true values">
+
+Reference recording, first 6 s, half speed. The model pendulum runs the current parameter estimates from the true release at $120^\circ$, without measurements
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/online_parameters.png" width={100} alt="Three rows of parameter estimates with two-sigma bands: on the left the first 2.5 seconds, where they jump and converge; on the right the rest, strongly zoomed in, where they lie on top of the offline estimate">
+
+Reference recording, augmented EKF started from rough guesses. The right column is zoomed in 50 to 600 times
+
+</Figure>
+
+| reference recording | online, after 20 s | offline output error (2.4) | true | within tolerance for good from |
+|---|---|---|---|---|
+| $\omega_0^2$ in $\text{s}^{-2}$ | $9.8093 \pm 0.0013$ | $9.8096 \pm 0.0009$ | $9.81$ | $1.3\ \text{s}$ (within 1%) |
+| $\mu$ in $\text{s}^{-1}$ | $0.2000 \pm 0.0002$ | $0.2002 \pm 0.0001$ | $0.2$ | $1.4\ \text{s}$ (within 10%) |
+| $b$ | $1.495^\circ \pm 0.012^\circ$ | $1.496^\circ \pm 0.013^\circ$ | $1.5^\circ$ | $2.8\ \text{s}$ (within $0.1^\circ$) |
+
+Within about a second and a half, half a period of this large swing, the filter knows
+$\omega_0^2$ to 1% and $\mu$ to 10%; after 20 s it agrees with the offline fit of chapter 2
+within the error bars of both. **The recursive filter, one sample at a time, reproduces the
+batch estimate that saw the whole recording at once.** Its error bars are honest too: the
+true values lie within $\pm 2\sigma$ 97% to 100% of the time after the start. Meanwhile it
+estimates the state: after the first $5\ \text{s}$ its velocity error is $0.0017\ \text{rad/s}$,
+no worse than the tuned filter of section 5.5 that was handed the offline model
+($0.0021\ \text{rad/s}$ over the same interval). All of this costs $0.06\ \text{ms}$ per sample.
+
+Two differences with the offline fit are worth noting. The online error bars are somewhat
+wider ($\omega_0^2$: $0.0013$ against $0.0009$) because the filter allows process noise: it
+can explain part of any mismatch as a random push rather than as a parameter error, so it
+learns a little less from the same data. And on the small swing, where the parameters are
+harder to separate, the online estimate is less precise: $\omega_0^2 = 9.8159 \pm 0.0044$
+against $9.8126 \pm 0.0025$ offline, with the true value outside $2\sigma$ 13% of the time,
+and a velocity error after $5\ \text{s}$ of $0.0030$ against $0.0018\ \text{rad/s}$.
+
+### The start-up is fragile
+
+With constant parameters the filter never forgets: their covariance only shrinks, so what
+they learn early stays. That makes the first samples, when everything is uncertain, the
+dangerous ones. In a first version the gate of section 5.4 was switched on after
+$0.2\ \text{s}$, a common choice to let a filter settle. The recording has an outlier at
+$0.11\ \text{s}$:
+
+<Figure src="/media/pendulum-lab/online_gate_late.png" width={100} alt="Estimate of omega0 squared over time on a logarithmic time axis: with the gate on from the first sample it converges to 9.81; with the gate on from 0.2 seconds, an outlier at 0.11 seconds throws it to above 20 where it stays">
+
+Reference recording, augmented EKF, the same start with two gate settings
+
+</Figure>
+
+The ungated filter takes the $22^\circ$ outlier at face value. With the parameters still
+uncertain, it explains the jump partly as a much stiffer pendulum, $\omega_0^2 \approx 20$.
+From then on its predictions are wrong, and once the gate is switched on it rejects 1904
+of the remaining 1980 measurements as outliers: the lock-out of section 5.4, now permanent.
+It ends at $\omega_0^2 = 23.1$, $\mu = 2.1$, $b = -3.3^\circ$. With the gate on from the very first
+sample, the same outlier is rejected: the angle uncertainty collapses within a few samples,
+and the gate becomes narrow long before the parameters are known.
+
+### Parameters that change
+
+A parameter whose covariance shrinks to zero cannot follow a change: if the damping doubles
+halfway through a run, the filter keeps the old value. The remedy is the same as for the
+state, a small process noise on the parameters, a random walk with spectral density
+$q_\mu$. In a simulated test where $\mu$ doubles from 0.1 to 0.2 halfway, the filter with
+$q_\mu = 10^{-4}$ ends at $0.209$, the one with constant parameters stays at $0.101$. The cost
+is noisier estimates when nothing changes; $q_\mu$ sets how fast the filter forgets, the
+same trade-off as $q$ in section 5.5. The frozen recordings have constant parameters, so the
+filter here uses none.
+
+### What we learned
+
+- Unknown parameters can be estimated online by making them states; the EKF then learns the
+  model and the state together, one sample at a time.
+- From a rough guess, the filter learns $\omega_0^2$ and $\mu$ within one or two swings and
+  ends where the offline fit of chapter 2 ended, with honest error bars, at $0.06\ \text{ms}$
+  per sample.
+- What a filter with constant parameters learns early, it keeps. Outliers must be rejected
+  from the first sample, and parameters that may change need a process noise of their own.
+
+## 5.7 The unscented Kalman filter
+
+The EKF approximates the dynamics: it replaces them by a straight line through the current
+estimate, and pushes the covariance through that line. The **unscented Kalman filter**
+(UKF) approximates the belief instead. It keeps the true nonlinear model, and pushes a
+handful of carefully chosen points through it.
+
+### Sigma points
+
+For a state with $n$ components, take $2n + 1$ **sigma points**: the mean, and two points on
+either side of it along each axis of the covariance,
+
+$$
+\mathcal X_0 = \hat{\mathbf x},
+\qquad
+\mathcal X_{\pm i} = \hat{\mathbf x} \pm \sqrt{n}\thinspace \mathbf s_i,
+\qquad
+\mathbf s_i = \text{column } i \text{ of a square root of } P .
+$$
+
+They have exactly the mean and covariance of the belief. Move each one with the full
+nonlinear model, one RK4 step, and measure the cloud they form: its weighted mean and
+covariance are the prediction. This is the **unscented transform**. It needs no Jacobian,
+and it is exact for the mean up to second order where the linearization is only first-order:
+it sees that a belief spread over a curved region has a mean that the curve's tangent misses.
+The measurement of the pendulum is linear, so the update step is unchanged. In the code
+only the prediction differs, and it costs five model steps instead of one.
+
+### Where the linearization goes wrong
+
+The difference shows when a wide belief is pushed far through a strongly nonlinear region,
+without measurements to correct it. Start near $120^\circ$ with $\sigma_\theta = 15^\circ$ and
+$\sigma_{\dot\theta} = 0.5\ \text{rad/s}$, and compare both filters with 20 000 samples of the
+same belief, each moved with the exact model:
+
+<Figure video="/media/pendulum-lab/unscented_propagation.mp4" width={100} alt="A cloud of samples released around 120 degrees swings down and bends into a curved band; the UKF's ellipse and mean follow the cloud's mean, while the EKF's mean drifts away from it">
+
+Released from $\theta = 120^\circ$, $\dot\theta = 0$ with $\sigma_\theta = 15^\circ$, $\sigma_{\dot\theta} = 0.5\ \text{rad/s}$, five times slowed down
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/ukf_propagation.png" width={100} alt="The same belief at 0, 0.5 and 1 second: the Monte Carlo cloud bends into a banana; the UKF mean sits on the cloud's mean, the EKF mean is off; both ellipses are of similar size">
+
+The same belief at three moments. Dots: the sigma points of the UKF
+
+</Figure>
+
+| mean of the belief after | samples (truth) | EKF | UKF |
+|---|---|---|---|
+| $0.5\ \text{s}$ | $60.4^\circ$ | $57.5^\circ$ (0.53 $\sigma$ off) | $60.4^\circ$ (0.00 $\sigma$ off) |
+| $1.0\ \text{s}$ | $-66.2^\circ$ | $-73.5^\circ$ (0.41 $\sigma$ off) | $-67.0^\circ$ (0.09 $\sigma$ off) |
+
+The UKF puts the mean where the samples are; the EKF is off by half a standard deviation.
+Neither gets the *shape* right: the cloud bends into a banana that no ellipse can describe,
+and after one second both ellipses have only about 40% of the area of the samples'
+covariance ellipse. From $20^\circ$, where
+the dynamics are nearly linear over the belief, both filters are indistinguishable from the
+samples.
+
+### In the filter
+
+With measurements every $10\ \text{ms}$ the belief never gets wide: after the start-up the
+angle is known to a fraction of a degree, and over such a small region every smooth model is
+linear. On the reference recording, with the tuned noise of section 5.5:
+
+| reference, $\dot\theta$ RMS error ($t \ge 2\ \text{s}$) | EKF | UKF |
+|---|---|---|
+| measured at $100\ \text{Hz}$ | $0.0019\ \text{rad/s}$ | $0.0019\ \text{rad/s}$ |
+| measured at $10\ \text{Hz}$ | $0.0066\ \text{rad/s}$ | $0.0067\ \text{rad/s}$ |
+| measured at $4\ \text{Hz}$ | $0.0059\ \text{rad/s}$ | $0.0055\ \text{rad/s}$ |
+| cost per measurement at $100\ \text{Hz}$ | $37\ \mu\text{s}$ | $61\ \mu\text{s}$ |
+
+At $100\ \text{Hz}$ the two filters agree to four digits. Only when the measurements become
+sparse does the belief grow between them, and the UKF starts to help a little.
+
+The hardest case is the start-up at $2\ \text{Hz}$: half a second of prediction from a belief
+that still barely knows the velocity. Started with the right velocity, $\dot\theta_0 = 0$ (the
+pendulum was released from rest), the EKF does well ($0.0061\ \text{rad/s}$) and the UKF fails
+($0.21\ \text{rad/s}$). That comparison is unfair to the UKF: the EKF follows the single trajectory
+through its prior mean, which here happens to be the true one, while the UKF averages over
+all the trajectories its prior allows, and with $\sigma_{\dot\theta} = 2\ \text{rad/s}$ at
+$120^\circ$ some of them go over the top. Started with a wrong velocity, as would happen in
+practice, the picture reverses:
+
+| 12 starts with a wrong velocity ($\pm 0.5$, $\pm 1$, $\pm 1.5\ \text{rad/s}$; $\sigma_{\dot\theta} = 1$ or $2\ \text{rad/s}$) | EKF failed | UKF failed |
+|---|---|---|
+| measured at $10\ \text{Hz}$ | 0 | 0 |
+| measured at $4\ \text{Hz}$ | 0 | 0 |
+| measured at $2\ \text{Hz}$ | 8 | 4 |
+
+A failure here means the gate locks the filter out, as in section 5.4. The UKF fails half as
+often, but it still fails: when the belief straddles the separatrix, part of it swings back and
+part goes over the top, and the true belief has two separate lumps. No Gaussian filter,
+extended or unscented, can represent that.
+
+The same holds for the parameters of section 5.6: with an unscented prediction the augmented
+filter ends at $\omega_0^2 = 9.8102 \pm 0.0013$ (EKF: $9.8093 \pm 0.0013$, true $9.81$), with the
+true parameters within $2\sigma$ all the time instead of 97% to 100%, at about twice the cost.
+A small gain in honesty, no gain in accuracy.
+
+### What we learned
+
+- The UKF approximates the belief by sigma points instead of approximating the model by a
+  line; it needs no Jacobian, which matters for models where one is hard to write down.
+- It predicts the mean of a wide belief correctly where the EKF is biased, but neither can
+  represent a belief that is not shaped like an ellipse.
+- For this pendulum, measured at $100\ \text{Hz}$, the two filters are indistinguishable. The
+  UKF only helps when the belief becomes wide, here between sparse measurements.
+
+## 5.8 Looking back: the Rauch–Tung–Striebel smoother
+
+Every estimate in this chapter so far used the past only, because a controller has nothing
+else. After the experiment, the whole recording is available, and an estimate of the state at
+time $t_k$ may also use what was measured after it. That is **smoothing**: the offline
+counterpart of filtering, and the missing corner of the
+[storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions). The Savitzky–Golay derivative of
+section 2.2 was a smoother without a model.
+
+### A backward pass
+
+The Rauch–Tung–Striebel (RTS) smoother needs no new model and no new measurements. It runs
+the Kalman filter forward as before and stores its estimates and predictions. A second pass
+then runs *backwards* in time, from the last sample to the first. At the last sample the
+filter has already seen everything, so the smoothed estimate equals the filtered one. Going
+back, each filtered estimate is corrected by how much the smoothed estimate one step later
+differs from what the filter had predicted for it:
+
+$$
+G_k = P_k F_k^\top \left(P^-_{k+1}\right)^{-1},
+$$
+
+$$
+\hat{\mathbf x}^s_k = \hat{\mathbf x}^f_k + G_k \left(\hat{\mathbf x}^s_{k+1} - \hat{\mathbf x}^-_{k+1}\right),
+$$
+
+$$
+P^s_k = P_k + G_k \left(P^s_{k+1} - P^-_{k+1}\right) G_k^\top .
+$$
+
+The superscripts mark the filtered estimate ($f$, with covariance $P$), the filter's
+prediction for the next sample ($-$) and the smoothed estimate ($s$). $F_k$ is the transition the filter used from
+sample $k$ to $k + 1$; for the EKF, the linearization around the filtered estimate. The gain $G_k$ says how much of a surprise
+about the next state should be blamed on the current one. The cost is one more pass over the
+data, with no new model evaluations.
+
+<Figure video="/media/pendulum-lab/rts_backward_pass.mp4" width={100} alt="The velocity error of the filter is drawn from left to right with its uncertainty band, large at the start; then a line sweeps back from right to left and replaces it by the smoother's error, which is flat and has a narrow band from the very first sample">
+
+Reference recording, first 3 s; filter and smoother as in section 5.5
+
+</Figure>
+
+### Results
+
+<Figure src="/media/pendulum-lab/smoother_reference.png" width={100} alt="Top, on a logarithmic scale: the Savitzky-Golay derivative error is around 0.05 rad/s; the filter starts large and settles near 0.002; the smoother and the output-error simulation lie on top of each other near 0.002 from the first sample. Bottom: the smoother's error oscillates and touches or slightly exceeds its own two-sigma band">
+
+Reference recording. The filter and the smoother use the gated EKF with the tuned noise of section 5.5
+
+</Figure>
+
+| reference recording, whole run | $\theta$ RMS error | $\dot\theta$ RMS error | largest $\dot\theta$ error |
+|---|---|---|---|
+| Kalman filter (5.5): past only | $0.053^\circ$ | $0.044\ \text{rad/s}$ | $1.65\ \text{rad/s}$ |
+| RTS smoother: all measurements | $0.033^\circ$ | $0.0017\ \text{rad/s}$ | $0.0035\ \text{rad/s}$ |
+| simulation of the output-error fit (2.4) | $0.031^\circ$ | $0.0016\ \text{rad/s}$ | |
+| Savitzky–Golay derivative (2.2) | | $0.062\ \text{rad/s}$ | |
+
+The biggest gain is at the start. The filter has to learn the velocity from the first
+measurements, and its error starts above $1\ \text{rad/s}$. The smoother knows the velocity at
+$t = 0$ from the measurements that followed, and is as accurate there as anywhere else. Once the
+filter has settled, the future adds little: after $2\ \text{s}$ the velocity error only drops
+from $0.0019$ to $0.0018\ \text{rad/s}$, because the dynamics already carry most of the past
+information forward. The angle, measured directly, improves more: by 40%.
+
+The smoother is 35 times more accurate than the Savitzky–Golay derivative of chapter 2, which
+also used past and future samples, but no model. And it lands right on top of the simulation
+of the output-error fit. That is no coincidence: with less and less process noise, the
+smoother trusts the model more and more, and in the limit it *is* the output-error trajectory.
+
+| process noise $q$ | $10^{-10}$ | $10^{-8}$ | $10^{-6}$ | $2.6 \cdot 10^{-6}$ (5.5) | $10^{-4}$ |
+|---|---|---|---|---|---|
+| smoother's distance to the output-error trajectory, $\dot\theta$ RMS | $0.00009$ | $0.00009$ | $0.00017$ | $0.00028$ | $0.0019$ |
+
+This is the link between chapters 2 and 5 in numbers: **output error is the smoother of a
+model without process noise.** Allow process noise, and the smoother may deviate from the
+model's trajectory where the measurements insist.
+
+One honest caveat: the smoother is slightly overconfident. Its mean NEES is $2.7$, and its
+error stays within $\pm 2\sigma$ 92% of the time instead of 95%. The bottom panel shows why:
+what is left of the error is the slow oscillation of section 5.5, caused by the identified
+parameters being very slightly off. That is a model error, not noise, and no amount of
+smoothing removes it. On the small swing the picture is the same: $0.029$ falls to
+$0.0016\ \text{rad/s}$, against $0.0012\ \text{rad/s}$ for the output-error simulation.
+
+### What we learned
+
+- The RTS smoother is the offline state estimate: one forward Kalman pass, one backward
+  correction, every estimate using all measurements.
+- It removes the filter's start-up error and improves the directly measured angle by 40%.
+  Where the filter has settled, the future adds little.
+- Without process noise it becomes the output-error simulation of chapter 2: identification
+  and state estimation are the same problem.
+
+## Chapter summary
+
+From the same angle measurements as chapter 2, this chapter estimated the state *while the
+pendulum swings*, using only the past, and in the last section also with the future:
+
+| velocity estimate on the reference recording | $\dot\theta$ RMS error, $t \ge 2\ \text{s}$ |
+|---|---|
+| linear Kalman filter, small-angle model (5.2, 5.3) | $0.417\ \text{rad/s}$ |
+| extended Kalman filter (5.3) | $0.0119\ \text{rad/s}$ |
+| EKF with innovation gating (5.4) | $0.0030\ \text{rad/s}$ |
+| EKF with gating and noise tuned from the innovations (5.5) | $0.0019\ \text{rad/s}$ |
+| EKF learning its own parameters from a rough guess (5.6) | $0.0032\ \text{rad/s}$, after $5\ \text{s}$: $0.0017\ \text{rad/s}$ |
+| UKF with gating and tuned noise (5.7) | $0.0019\ \text{rad/s}$ |
+| RTS smoother, offline (5.8) | $0.0018\ \text{rad/s}$, whole run: $0.0017\ \text{rad/s}$ |
+
+For comparison: differentiating the measurements (5.1) gave an error of several rad/s, and the
+non-causal Savitzky–Golay derivative of chapter 2 $0.062\ \text{rad/s}$.
+
+Each step was a better model of something: of the dynamics, of the sensor, of the noise, of
+the parameters. The filter's own uncertainty was checked at every step, and the
+failures were as instructive as the successes: a wrong model makes a filter confident
+rather than uncertain, a gate can lock a filter out, a small process noise leaves no margin
+for model error, and an early outlier can ruin learned parameters for good.
+
+**Next:** chapter 6 · the Furuta pendulum.

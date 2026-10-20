@@ -1,0 +1,261 @@
+---
+project: pendulum-lab
+number: 1
+title: "The simple pendulum"
+summary: "The forward problem: equation of motion, the small-angle approximation and where it breaks, state space, fixed points and the phase flow."
+---
+import Figure from '../../../components/Figure.astro';
+
+This chapter is the **forward problem** of the report: given the equation of motion, its
+parameters and an initial state, what motion follows? Every later chapter turns this around
+and starts from measurements instead; the [storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)
+shows how they fit together.
+
+All figures come from `scripts/make_figures.py`, and all
+animations from `animations/simple_pendulum_scenes.py`.
+Both use the same model in
+`src/pendulum_lab/simple_pendulum.py`.
+All simulations use $g = 9.81\ \text{m/s}^2$ and $L = 1\ \mathrm{m}$; each caption lists the
+initial conditions $(\theta_0, \dot\theta_0)$ and the damping $\mu$.
+
+## 1.1 Equation of motion
+
+A point mass hangs from a massless rod of length $L$. Measure the angle $\theta$ from the
+downward vertical, positive to the right. The mass moves along a circle, so its arc
+position is $s = L\theta$ and its tangential acceleration is $\ddot s = L\ddot\theta$.
+
+Gravity $g$ points straight down. Only its component along the direction of motion
+accelerates the mass, and that component is $-g\sin\theta$. The minus sign means it always
+pulls back toward the bottom. So the equation becomes:
+
+$$
+L\ddot\theta = -g\sin\theta
+$$
+
+Air resistance and friction at the pivot are modelled as a torque proportional to the
+angular velocity, with damping coefficient $\mu$:
+
+$$
+\boxed{\mskip5mu \ddot\theta = -\frac{g}{L}\sin\theta - \mu\thinspace \dot\theta\mskip5mu }
+$$
+
+Two sanity checks:
+- At $\theta = 0$ the restoring term vanishes, so there is no acceleration at the bottom.
+- At $\theta = 90^\circ$ it equals $-\tfrac{g}{L}$, which is free fall along the arc.
+
+The mass $m$ has dropped out. From motion data alone, only $\omega_0^2 = \tfrac{g}{L}$ and $\mu$ can
+be identified, not $m$, and not $g$ and $L$ separately. Chapter 2 relies on this.
+
+## 1.2 There is no closed-form solution
+
+The $\sin\theta$ term makes the equation nonlinear. Without damping, an exact solution
+exists, but it is written in terms of Jacobi elliptic functions. With damping, no
+closed form is known at all. But we can solve it numerically and investigate it geometrically.
+
+Numerically, the simplest approach is Euler's method: take small steps
+$\theta \mathrel{+}= \dot\theta\thinspace \Delta t$ and $\dot\theta \mathrel{+}= \ddot\theta\thinspace \Delta t$.
+This works, but it needs a tiny $\Delta t$ and slowly gains or loses energy. We use SciPy's
+adaptive 8th-order Runge–Kutta method (`DOP853`) with tolerance $10^{-10}$ instead. A test
+checks that the undamped energy stays constant to within $10^{-8}$ relative error.
+
+<Figure video="/media/pendulum-lab/pendulum_time_series.mp4" width={85} alt="Pendulum swinging next to its angle θ(t) being traced">
+
+$\theta_0 = 60^\circ,\ \dot\theta_0 = 0\ \text{rad/s},\ \mu = 0.25\ \text{s}^{-1}$
+
+</Figure>
+
+## 1.3 The small-angle approximation, and where it breaks
+
+For small angles, $\sin\theta \approx \theta$ and the equation becomes **linear**:
+
+$$
+\ddot\theta + \mu\thinspace \dot\theta + \omega_0^2\thinspace \theta = 0, \qquad \omega_0 = \sqrt{\tfrac{g}{L}}.
+$$
+
+Trying $\theta = e^{\lambda t}$ gives $\lambda^2 + \mu\lambda + \omega_0^2 = 0$, so
+$\lambda = -\tfrac{\mu}{2} \pm i\thinspace \omega_d$ with the damped frequency
+$\omega_d = \sqrt{\omega_0^2 - \tfrac{\mu^2}{4}}$. For the underdamped case
+$\mu \lt 2\omega_0$, the solution with initial state $(\theta_0, \dot\theta_0)$ is a sine and
+cosine under an exponential envelope:
+
+$$
+\theta(t) = e^{-\frac{\mu}{2} t}\left[\theta_0\cos\omega_d t + \frac{\dot\theta_0 + \tfrac{\mu}{2}\theta_0}{\omega_d}\thinspace \sin\omega_d t\right].
+$$
+
+This is the "harmonic motion" from introductory physics, with period
+$T_0 = 2\pi\sqrt{\tfrac{L}{g}}$, independent of amplitude. Comparing it with the numerical
+solution of the full equation shows how far it can be trusted:
+
+<Figure src="/media/pendulum-lab/small_angle_comparison.png" width={100} alt="Nonlinear vs. small-angle solution for four release angles">
+
+$\theta_0 = 10^\circ,\ 60^\circ,\ 120^\circ,\ 170^\circ;\ \ \dot\theta_0 = 0\ \text{rad/s};\ \ \mu = 0.15\ \text{s}^{-1}$
+
+</Figure>
+
+- At $\theta_0 = 10^\circ$ the curves are indistinguishable.
+- At $\theta_0 = 60^\circ$ the real pendulum already lags behind.
+- At $\theta_0 = 120^\circ$ and $170^\circ$ the shape changes too. The real pendulum lingers near the top,
+  where $\sin\theta$ is much smaller than $\theta$, so its curve is flattened and stretched,
+  and it is no longer a decaying sinusoid.
+
+The lag is a **longer period**. For the undamped pendulum the exact period is
+
+$$
+T = 4\sqrt{\frac{L}{g}}\mskip5mu K\negthinspace \left(\sin^2\frac{\theta_0}{2}\right)
+\mskip5mu \approx\mskip5mu  T_0\left(1 + \frac{\theta_0^2}{16} + \dots\right),
+$$
+
+where $K$ is the complete elliptic integral of the first kind. A test checks this
+formula against the simulation at $\theta_0 = 150^\circ$.
+
+<Figure src="/media/pendulum-lab/period_vs_amplitude.png" width={80} alt="Period as a function of amplitude">
+
+Released from rest: $\theta_0 = 0^\circ \ldots 179^\circ,\ \dot\theta_0 = 0\ \text{rad/s}$; undamped, $\mu = 0$
+
+</Figure>
+
+The period is 7% longer at $60^\circ$, 37% longer at $120^\circ$, and grows without bound as
+$\theta_0 \to 180^\circ$, where the pendulum balances upright.
+
+Side by side, released from $\theta_0 = 110^\circ$:
+
+<Figure video="/media/pendulum-lab/small_angle_comparison.mp4" width={70} alt="Real pendulum and small-angle pendulum drifting apart">
+
+$\theta_0 = 110^\circ,\ \dot\theta_0 = 0\ \text{rad/s},\ \mu = 0.1\ \text{s}^{-1}$ · blue: full model · yellow: small-angle model
+
+</Figure>
+
+## 1.4 State space
+
+Plotting $\theta$ against $t$ hides the structure. The key idea is that the pendulum's
+**state** is fully described by two numbers, the angle and the angular velocity:
+
+$$
+\mathbf{x} = \begin{bmatrix}\theta \cr \dot\theta\end{bmatrix}, \qquad
+\dot{\mathbf{x}} = \mathbf{f}(\mathbf{x}) = \begin{bmatrix}\dot\theta \cr -\tfrac{g}{L}\sin\theta - \mu\thinspace \dot\theta\end{bmatrix}.
+$$
+
+One second-order equation has become a system of two first-order equations. Each point
+of the $(\theta, \dot\theta)$ plane is one possible state, and the pendulum's history is a
+curve through that plane.
+
+<Figure video="/media/pendulum-lab/phase_space_trajectory.mp4" width={85} alt="Pendulum and its state tracing an inward spiral">
+
+$\theta_0 = 60^\circ,\ \dot\theta_0 = 0\ \text{rad/s},\ \mu = 0.3\ \text{s}^{-1}$
+
+</Figure>
+
+Damping removes energy on every swing, so the state **spirals inward** to the origin,
+where the pendulum hangs still. To make that precise, define the energy per unit
+$mL^2$:
+
+$$
+E = \tfrac12\dot\theta^2 + \omega_0^2(1 - \cos\theta), \qquad
+\dot E = -\mu\thinspace \dot\theta^2 \le 0 .
+$$
+
+## 1.5 The vector field and its fixed points
+
+$\mathbf{f}$ assigns a velocity vector to every point of state space. Drawing those
+vectors gives a **vector field**, and solving the equation means following it: at every
+instant, the state moves with the arrow it is sitting on.
+
+<Figure video="/media/pendulum-lab/vector_field_fixed_points.mp4" width={100} alt="Vector field on the unwrapped state space with fixed points and two trajectories">
+
+$\mu = 0.25\ \text{s}^{-1}$; trajectories start at $(\theta_0, \dot\theta_0) = ({-2.4}\ \text{rad},\ 3.5\ \text{rad/s})$ and $(\pi + 0.03\ \text{rad},\ 0\ \text{rad/s})$; played at 1.5× speed · arrows are shortened to avoid clutter, color shows speed
+
+</Figure>
+
+**Fixed points** are where the field vanishes, $\mathbf{f}(\mathbf{x}^{\ast}) = \mathbf{0}$:
+
+$$
+\dot\theta^{\ast} = 0, \quad \sin\theta^{\ast} = 0 \quad\Longrightarrow\quad
+\mathbf{x}^{\ast}_k = (k\pi,\thinspace  0), \qquad k \in \mathbb{Z}.
+$$
+
+Because $\theta$ is an angle, $\theta$ and $\theta + 2\pi$ describe the same physical
+position. The state space is really a **cylinder**, and the unwrapped plane repeats it
+every $2\pi$. So there are only two physically different equilibria: hanging down
+(even $k$) and balanced upright (odd $k$).
+
+**Stability** follows from linearizing around each fixed point. The Jacobian is
+
+$$
+J(\mathbf{x}^{\ast}) = \frac{\partial \mathbf{f}}{\partial \mathbf{x}}\bigg|_{\mathbf{x}^{\ast}}
+= \begin{bmatrix} 0 & 1 \cr -\omega_0^2\cos\theta^{\ast} & -\mu \end{bmatrix}.
+$$
+
+| Fixed point | $\cos\theta^{\ast}$ | Eigenvalues | Type |
+|---|---|---|---|
+| Hanging, $\theta^{\ast} = 2k\pi$ | $+1$ | $-\tfrac{\mu}{2} \pm i\thinspace \omega_d$ | **stable spiral**: both have negative real part |
+| Upright, $\theta^{\ast} = (2k+1)\pi$ | $-1$ | $-\tfrac{\mu}{2} \pm \sqrt{\tfrac{\mu^2}{4} + \omega_0^2}$ | **saddle**: one positive eigenvalue, so unstable |
+
+The animation shows both cases. One state spirals into the bottom. The other starts a
+hair away from upright and immediately falls off the saddle into the neighboring well.
+The upright saddle comes back in later chapters: it is exactly the state that LQR, MPC
+and reinforcement learning will have to stabilize on the Furuta pendulum.
+
+### Changing the damping
+
+Changing $\mu$ reshapes the whole field at once. With $\mu = 0$, every orbit around the
+origin is closed (energy is conserved). As $\mu$ grows, the orbits open into spirals that
+reach the bottom faster.
+
+<Figure video="/media/pendulum-lab/damping_tweak.mp4" width={100} alt="Vector field and trajectories as damping μ changes">
+
+$\mu$ sweeps $0 \to 2.5 \to 0.25\ \text{s}^{-1}$; trajectories start at $(\theta_0, \dot\theta_0) = (0, 5.5),\ (1.7, 0),\ ({-0.8}, {-2.4})$ and $(2.9, 0)$ in rad and rad/s
+
+</Figure>
+
+## 1.6 Phase flow
+
+Instead of following one initial condition, we can let **every** point of state space
+move at once. The result looks like a fluid, or wind on a weather map, and is called the
+**phase flow**:
+
+<Figure video="/media/pendulum-lab/phase_flow.mp4" width={100} alt="Streamlines flowing along the pendulum vector field">
+
+$\mu = 0.25\ \text{s}^{-1}$; every point of the plane is an initial condition $(\theta_0, \dot\theta_0)$
+
+</Figure>
+
+The same structure, as a static portrait:
+
+<Figure src="/media/pendulum-lab/phase_portrait.png" width={100} alt="Phase portrait of the damped pendulum">
+
+$\mu = 0.25\ \text{s}^{-1}$; every streamline is the trajectory from one initial condition $(\theta_0, \dot\theta_0)$
+
+</Figure>
+
+The flow contracts around every hanging point (stable) and is split by every upright
+point (saddle). Above and below the "eyes", the flow runs steadily right or left.
+Those states have so much energy that the pendulum **rotates** instead of swinging.
+
+## 1.7 Swinging it hard
+
+Give the pendulum a strong push from the bottom: $\theta_0 = 0$, $\dot\theta_0 = 10$ rad/s.
+Its energy $E = 50\ \mathrm{s^{-2}}$ is well above the energy needed to reach the top,
+$2\omega_0^2 \approx 19.6\ \mathrm{s^{-2}}$. So it makes full rotations, and $\theta$ keeps
+increasing. Damping removes some energy on every turn. Once $E$ drops below $2\omega_0^2$,
+the state can no longer pass the next saddle. It is captured by a well and spirals in.
+
+<Figure video="/media/pendulum-lab/high_energy_swing.mp4" width={100} alt="Pendulum rotating several times before settling, with its unwrapped state-space trajectory">
+
+$\theta_0 = 0,\ \dot\theta_0 = 10\ \text{rad/s},\ \mu = 0.25\ \text{s}^{-1}$; played at 1.5× speed
+
+</Figure>
+
+The pendulum makes three full turns and comes to rest at $\theta = 6\pi$. Physically,
+that is the same hanging position as $\theta = 0$, but in the unwrapped picture it is
+three wells further along.
+
+## 1.8 Takeaways
+
+- The $\sin\theta$ in the equation is exactly why a real pendulum is **not** a sine wave:
+  its period grows with amplitude, and large swings are visibly non-sinusoidal.
+- The state $(\theta, \dot\theta)$ and the vector field $\mathbf{f}$ show *all*
+  possible motions at once, without solving anything.
+- The eigenvalues of the Jacobian at each fixed point determine its stability. The pendulum hanging straight down is a stable fixed point (a spiral that attracts all nearby states). The pendulum balanced upright is an unstable saddle point: the slightest disturbance sends the state away from it.
+
+**Next:** given only measured motion, can we recover $\omega_0^2$ and $\mu$? We'll try
+classical least squares first, then physics-informed neural networks (PINNs).
