@@ -1,0 +1,14 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="Not found">
+  <section class="section container nf">
+    <p class="eyebrow eyebrow--accent">404</p>
+    <h1>This one fell over.</h1>
+    <p class="lede">The page you asked for is not a stable equilibrium. Try the <a href="/">home page</a> or the <a href="/projects/">projects</a>.</p>
+  </section>
+</Base>
+
+<style>
+  .nf { display: grid; gap: var(--space-4); min-height: 50dvh; align-content: center; }
+</style>

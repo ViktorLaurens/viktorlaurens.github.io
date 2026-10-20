@@ -1,0 +1,33 @@
+---
+const year = new Date().getFullYear();
+---
+<footer class="footer">
+  <div class="container footer__in">
+    <div class="footer__col">
+      <p class="footer__name">Viktor Laurens De Groote</p>
+      <p class="muted">Engineer in control, learning and robotics. Brussels, Belgium.</p>
+    </div>
+    <ul class="footer__links" aria-label="Contact and profiles">
+      <li><a href="mailto:viktor.degroote@gmail.com">viktor.degroote@gmail.com</a></li>
+      <li><a href="https://www.linkedin.com/in/viktor-laurens-de-groote/" rel="me noopener" target="_blank">LinkedIn</a></li>
+      <li><a href="https://github.com/ViktorLaurens" rel="me noopener" target="_blank">GitHub</a></li>
+      <li><a href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">CV (PDF)</a></li>
+    </ul>
+  </div>
+  <div class="container footer__meta faint">
+    <span>© {year} Viktor Laurens De Groote</span>
+    <span><a href="https://github.com/ViktorLaurens/viktorlaurens.github.io" target="_blank" rel="noopener">Source</a> · built with Astro, no trackers</span>
+  </div>
+</footer>
+
+<style>
+  .footer { border-top: 1px solid var(--line); margin-top: var(--space-16); background: var(--bg-sunken); }
+  .footer__in { display: grid; gap: var(--space-8); padding-block: var(--space-12); grid-template-columns: 1fr; }
+  @media (min-width: 720px) { .footer__in { grid-template-columns: 1.4fr 1fr; } }
+  .footer__name { font-weight: 600; }
+  .footer__links { list-style: none; margin: 0; padding: 0; display: grid; gap: .5em; font-family: var(--font-mono); font-size: .92rem; }
+  .footer__links a { text-decoration: none; color: var(--fg-muted); }
+  .footer__links a:hover { color: var(--accent); }
+  .footer__meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-4) var(--space-8); font-size: .82rem; font-family: var(--font-mono); }
+  .footer__meta a { text-decoration: none; }
+</style>

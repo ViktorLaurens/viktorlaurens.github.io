@@ -1,0 +1,29 @@
+---
+import { Image } from 'astro:assets';
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  project: CollectionEntry<'projects'>;
+}
+const { project } = Astro.props;
+const { title, summary, tags, cover, coverAlt, date } = project.data;
+---
+<a class="card" href={`/projects/${project.id}/`}>
+  {cover && (
+    <div class="card__media">
+      <Image src={cover} alt={coverAlt ?? ''} width={800} height={450} loading="lazy" />
+    </div>
+  )}
+  <div class="card__head">
+    <h3>{title}</h3>
+    <span class="mono faint card__year">{date.getFullYear()}</span>
+  </div>
+  <p class="muted">{summary}</p>
+  {tags.length > 0 && <div class="tags">{tags.map((t) => <span class="tag">{t}</span>)}</div>}
+</a>
+
+<style>
+  .card__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); }
+  .card__year { font-size: .8rem; }
+  .card p { flex: 1; font-size: .98rem; line-height: 1.5; }
+</style>

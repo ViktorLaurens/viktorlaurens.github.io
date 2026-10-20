@@ -1,0 +1,76 @@
+---
+const path = Astro.url.pathname;
+const links = [
+  { href: '/projects/', label: 'Projects' },
+  { href: '/about/', label: 'About' },
+];
+const isActive = (href: string) => path === href || path.startsWith(href);
+---
+<header class="nav">
+  <div class="container nav__in">
+    <a class="brand" href="/" aria-label="Home">
+      <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+        <line class="brand__rod" x1="16" y1="5" x2="23" y2="22" />
+        <circle cx="16" cy="5" r="2" fill="currentColor" />
+        <circle class="brand__bob" cx="23" cy="22" r="4.5" />
+      </svg>
+      <span class="brand__name">Viktor De&nbsp;Groote</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul class="nav__links">
+        {links.map((l) => (
+          <li><a href={l.href} aria-current={isActive(l.href) ? 'page' : undefined}>{l.label}</a></li>
+        ))}
+        <li><a class="nav__cv" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">CV <span aria-hidden="true">↓</span></a></li>
+        <li>
+          <button class="theme" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle theme">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path class="theme__moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
+              <circle class="theme__sun" cx="12" cy="12" r="4.2" />
+              <g class="theme__rays"><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></g>
+            </svg>
+          </button>
+        </li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<script>
+  const btn = document.getElementById('theme-toggle');
+  btn?.addEventListener('click', () => {
+    const root = document.documentElement;
+    const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try {
+      localStorage.setItem('theme', next);
+    } catch {
+      /* storage unavailable */
+    }
+  });
+</script>
+
+<style>
+  .nav { position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(140%) blur(10px); -webkit-backdrop-filter: saturate(140%) blur(10px); background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--line); }
+  .nav__in { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: var(--space-4); }
+  .brand { display: inline-flex; align-items: center; gap: .6em; text-decoration: none; font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
+  .brand:hover { color: var(--fg); }
+  .brand__mark { width: 28px; height: 28px; color: var(--fg); overflow: visible; }
+  .brand__rod { stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; transition: transform .5s var(--ease); transform-origin: 16px 5px; }
+  .brand__bob { fill: var(--accent); transition: transform .5s var(--ease); transform-origin: 16px 5px; }
+  .brand:hover .brand__bob, .brand:hover .brand__rod { transform: rotate(-50deg); }
+  .brand__name { font-size: 1rem; }
+  .nav__links { display: flex; align-items: center; gap: clamp(.6rem, 2vw, 1.5rem); list-style: none; margin: 0; padding: 0; }
+  .nav__links a { text-decoration: none; color: var(--fg-muted); font-weight: 500; font-size: .95rem; padding: .3em 0; border-bottom: 1.5px solid transparent; }
+  .nav__links a:hover { color: var(--fg); }
+  .nav__links a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
+  .nav__links a.nav__cv { font-family: var(--font-mono); font-size: .85rem; border: 1px solid var(--line-strong); border-radius: 6px; padding: .35em .7em; }
+  .nav__links a.nav__cv:hover { border-color: var(--accent); color: var(--accent); }
+  .theme { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--fg-muted); }
+  .theme:hover { color: var(--fg); border-color: var(--line-strong); }
+  .theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+  .theme__sun, .theme__rays { display: none; }
+  :global([data-theme="light"]) .theme__moon { display: none; }
+  :global([data-theme="light"]) .theme__sun, :global([data-theme="light"]) .theme__rays { display: block; }
+  @media (max-width: 480px) { .brand__name { display: none; } }
+</style>
