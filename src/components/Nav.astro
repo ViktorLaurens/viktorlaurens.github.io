@@ -25,6 +25,12 @@ const isActive = (href: string) => path === href || path.startsWith(href);
         ))}
         <li><a class="nav__cv" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">CV <span aria-hidden="true">↓</span></a></li>
         <li>
+          <button class="search" type="button" data-open-palette aria-label="Search the site (Ctrl K)" title="Search · Ctrl K">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <span class="search__kbd mono" aria-hidden="true">⌘K</span>
+          </button>
+        </li>
+        <li>
           <button class="theme" id="theme-toggle" type="button" aria-label="Toggle colour theme" title="Toggle theme">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path class="theme__moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
@@ -101,6 +107,11 @@ const isActive = (href: string) => path === href || path.startsWith(href);
   .nav__links a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
   .nav__links a.nav__cv { font-family: var(--font-mono); font-size: .85rem; border: 1px solid var(--line-strong); border-radius: 6px; padding: .35em .7em; }
   .nav__links a.nav__cv:hover { border-color: var(--accent); color: var(--accent); }
+  .search { display: inline-flex; align-items: center; gap: .45em; height: 34px; padding: 0 .55em; border-radius: 999px; border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--fg-muted); }
+  .search:hover { color: var(--fg); border-color: var(--line-strong); }
+  .search svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .search__kbd { font-size: .7rem; color: var(--fg-faint); border: 1px solid var(--line); border-radius: 4px; padding: .05em .35em; }
+  @media (max-width: 700px) { .search__kbd { display: none; } }
   .theme { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--fg-muted); }
   .theme:hover { color: var(--fg); border-color: var(--line-strong); }
   .theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }

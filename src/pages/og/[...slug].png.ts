@@ -3,7 +3,7 @@
  * /og/home.png, /og/about.png, /og/projects.png, /og/projects/<project>.png,
  * /og/projects/<project>/<chapter>.png, /og/404.png
  */
-import type { APIRoute, GetStaticPaths } from 'astro';
+import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
@@ -35,7 +35,7 @@ const PHASE = '/media/pendulum-lab/phase_portrait.png';
 const firstPng = (body: string | undefined): string | undefined => body?.match(/src="(\/media\/[^"]+\.png)"/)?.[1];
 const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s);
 
-export const getStaticPaths: GetStaticPaths = async () => {
+export async function getStaticPaths() {
   const projects = await getCollection('projects');
   const chapters = await getCollection('chapters');
   const cards: Array<{ params: { slug: string }; props: Card }> = [
@@ -55,9 +55,9 @@ export const getStaticPaths: GetStaticPaths = async () => {
     cards.push({ params: { slug: `projects/${projectId}/${chapterSlug}` }, props: { eyebrow: `${project?.data.title ?? projectId} · ${c.data.number < 10 ? `Chapter ${num}` : 'Gallery'}`, title: c.data.title, summary: c.data.summary, image: publicImage(firstPng(c.body) ?? PHASE) } });
   }
   return cards;
-};
+}
 
-const el = (type: string, style: Record<string, unknown>, children?: unknown, extra: Record<string, unknown> = {}) => ({ type, props: { style, children, ...extra } });
+const el =(type: string, style: Record<string, unknown>, children?: unknown, extra: Record<string, unknown> = {}) => ({ type, props: { style, children, ...extra } });
 
 function card({ eyebrow, title, summary, image }: Card) {
   const long = title.length > 34;
@@ -90,5 +90,5 @@ function card({ eyebrow, title, summary, image }: Card) {
 export const GET: APIRoute = async ({ props }) => {
   const svg = await satori(card(props as Card) as never, { width: W, height: H, fonts });
   const png = new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng();
-  return new Response(png, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+  return new Response(new Uint8Array(png), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' } });
 };

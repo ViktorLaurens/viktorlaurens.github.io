@@ -4,6 +4,7 @@ import 'katex/dist/katex.min.css';
 import { ClientRouter } from 'astro:transitions';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import CommandPalette from '../components/CommandPalette.astro';
 
 interface Props {
   title?: string;
@@ -69,6 +70,7 @@ const ogImage = new URL(image ?? `/og/${pagePath || 'home'}.png`, Astro.site);
       <slot />
     </main>
     <Footer />
+    <CommandPalette />
     <script>
       /** Page-level behaviours that must re-run after every client-side navigation. */
       let cleanup = new AbortController();
