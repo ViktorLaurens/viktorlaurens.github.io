@@ -24,10 +24,13 @@
 </div>
 
 <script>
-  import { mountPendulum } from '../sim/pendulum';
+  import { mountPendulum, type PendulumHandle } from '../sim/pendulum';
 
-  const canvas = document.getElementById('pendulum-canvas') as HTMLCanvasElement | null;
-  if (canvas) {
+  let sim: PendulumHandle | null = null;
+
+  function init() {
+    const canvas = document.getElementById('pendulum-canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
     const balance = document.getElementById('sim-balance') as HTMLButtonElement;
     const reset = document.getElementById('sim-reset') as HTMLButtonElement;
     const roT = document.getElementById('ro-theta')!;
@@ -36,7 +39,7 @@
     const roE = document.getElementById('ro-e')!;
     const fmt = (x: number) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(2);
 
-    const sim = mountPendulum({
+    const handle = mountPendulum({
       canvas,
       onState: (s) => {
         roT.textContent = fmt(s.theta);
@@ -46,17 +49,24 @@
         balance.setAttribute('aria-pressed', String(s.control));
       },
     });
+    sim = handle;
 
     balance.addEventListener('click', () => {
-      const on = !sim.getControl();
-      sim.setControl(on);
+      const on = !handle.getControl();
+      handle.setControl(on);
       balance.setAttribute('aria-pressed', String(on));
     });
     reset.addEventListener('click', () => {
-      sim.reset();
+      handle.reset();
       balance.setAttribute('aria-pressed', 'false');
     });
   }
+
+  document.addEventListener('astro:page-load', init);
+  document.addEventListener('astro:before-swap', () => {
+    sim?.destroy();
+    sim = null;
+  });
 </script>
 
 <style>

@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex';
 export default defineConfig({
   site: 'https://viktorlaurens.github.io',
   integrations: [mdx(), sitemap()],
+  prefetch: { prefetchAll: true, defaultStrategy: 'hover' },
   markdown: {
     remarkPlugins: [remarkMath],
     rehypePlugins: [rehypeKatex],

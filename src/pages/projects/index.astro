@@ -35,18 +35,20 @@ const tags = [...new Set(projects.flatMap((p) => p.data.tags))].sort();
 </Base>
 
 <script>
-  const buttons = document.querySelectorAll<HTMLButtonElement>('.tag--btn');
-  const items = document.querySelectorAll<HTMLElement>('#project-grid > [data-tags]');
-  buttons.forEach((b) =>
-    b.addEventListener('click', () => {
-      const tag = b.dataset.tag ?? '';
-      buttons.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-      items.forEach((el) => {
-        const has = !tag || (el.dataset.tags ?? '').split('|').includes(tag);
-        el.hidden = !has;
-      });
-    }),
-  );
+  document.addEventListener('astro:page-load', () => {
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.tag--btn');
+    const items = document.querySelectorAll<HTMLElement>('#project-grid > [data-tags]');
+    buttons.forEach((b) =>
+      b.addEventListener('click', () => {
+        const tag = b.dataset.tag ?? '';
+        buttons.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        items.forEach((el) => {
+          const has = !tag || (el.dataset.tags ?? '').split('|').includes(tag);
+          el.hidden = !has;
+        });
+      }),
+    );
+  });
 </script>
 
 <style>

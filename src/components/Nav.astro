@@ -37,8 +37,9 @@ const isActive = (href: string) => path === href || path.startsWith(href);
 </header>
 
 <script>
-  const btn = document.getElementById('theme-toggle');
-  btn?.addEventListener('click', () => {
+  // Delegated so it keeps working after client-side navigations.
+  document.addEventListener('click', (e) => {
+    if (!(e.target as Element).closest('#theme-toggle')) return;
     const root = document.documentElement;
     const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
     root.setAttribute('data-theme', next);

@@ -11,7 +11,7 @@ const { title, summary, tags, cover, coverAlt, coverVideo, date } = project.data
 <a class="card" href={`/projects/${project.id}/`}>
   {coverVideo ? (
     <div class="card__media">
-      <video src={coverVideo} autoplay loop muted playsinline preload="metadata" aria-label={coverAlt ?? ''}></video>
+      <video src={coverVideo} loop muted playsinline preload="metadata" data-autoplay aria-label={coverAlt ?? ''}></video>
     </div>
   ) : cover ? (
     <div class="card__media">
