@@ -1,0 +1,58 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import ProjectCard from '../../components/ProjectCard.astro';
+
+const projects = (await getCollection('projects'))
+  .sort((a, b) => a.data.order - b.data.order || b.data.date.valueOf() - a.data.date.valueOf());
+const tags = [...new Set(projects.flatMap((p) => p.data.tags))].sort();
+---
+<Base title="Projects" description="Case studies in modelling, system identification, state estimation and control.">
+  <section class="section container">
+    <p class="eyebrow eyebrow--accent">Projects</p>
+    <h1>Case studies</h1>
+    <p class="lede" style="margin-top: var(--space-4)">
+      Each project is a question, a method, results you can see, and the code behind them.
+    </p>
+
+    {tags.length > 0 && (
+      <div class="filters" role="group" aria-label="Filter by topic">
+        <button class="tag tag--btn" data-tag="" aria-pressed="true" type="button">All</button>
+        {tags.map((t) => <button class="tag tag--btn" data-tag={t} aria-pressed="false" type="button">{t}</button>)}
+      </div>
+    )}
+
+    {projects.length === 0 ? (
+      <p class="muted empty">The first case studies are being written. First up: Pendulum Lab.</p>
+    ) : (
+      <div class="grid" id="project-grid">
+        {projects.map((p) => (
+          <div data-tags={p.data.tags.join('|')}><ProjectCard project={p} /></div>
+        ))}
+      </div>
+    )}
+  </section>
+</Base>
+
+<script>
+  const buttons = document.querySelectorAll<HTMLButtonElement>('.tag--btn');
+  const items = document.querySelectorAll<HTMLElement>('#project-grid > [data-tags]');
+  buttons.forEach((b) =>
+    b.addEventListener('click', () => {
+      const tag = b.dataset.tag ?? '';
+      buttons.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      items.forEach((el) => {
+        const has = !tag || (el.dataset.tags ?? '').split('|').includes(tag);
+        el.hidden = !has;
+      });
+    }),
+  );
+</script>
+
+<style>
+  .filters { display: flex; flex-wrap: wrap; gap: .5em; margin-block: var(--space-8) var(--space-8); }
+  .tag--btn { background: transparent; cursor: pointer; transition: all .15s var(--ease); }
+  .tag--btn:hover { border-color: var(--accent); color: var(--accent); }
+  .tag--btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .empty { margin-top: var(--space-12); }
+</style>

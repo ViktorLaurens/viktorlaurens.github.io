@@ -1,0 +1,77 @@
+---
+import Base from '../layouts/Base.astro';
+
+const timeline = [
+  { when: '2023 – 2024', what: 'MSc Electromechanical Engineering: Robotics', where: 'Vrije Universiteit Brussel & Université Libre de Bruxelles', note: 'Magna cum laude. Thesis on multi-robot task and motion planning: a hybrid framework for collision-free motion planning of multiple manipulators. Student delegate.' },
+  { when: 'Jul – Oct 2023', what: 'Research internship, Department of Engineering Cybernetics', where: 'NTNU, Trondheim', note: 'Communication-aware path planning for autonomous underwater fleets. Built an optical communication framework for AUVs with Hydromea Luma modems.' },
+  { when: 'Sep – Dec 2022', what: 'Driverless team member', where: 'VUB Racing, Formula Student', note: 'First year of the team\'s driverless vehicle.' },
+  { when: '2019 – 2022', what: 'BSc Engineering: Electromechanical Engineering', where: 'Vrije Universiteit Brussel', note: 'Magna cum laude. Student delegate and recurring team lead on project courses; co-wrote a course text on DC motor drives for ArcelorMittal Belgium.' },
+];
+---
+<Base title="About" description="Who I am: an engineer in control, learning and robotics from Brussels.">
+  <section class="section container about">
+    <div class="about__intro">
+      <p class="eyebrow eyebrow--accent">About</p>
+      <h1>Viktor Laurens De Groote</h1>
+      <div class="prose" style="margin-top: var(--space-6)">
+        <p class="lede">
+          I'm an engineer in control, learning and robotics, trained in electromechanical engineering
+          at VUB and ULB in Brussels.
+        </p>
+        <p>
+          What pulls me in is the moment an abstract theory becomes a machine that behaves. My work sits
+          where system identification, state estimation and control meet learning: fitting models to real,
+          noisy data, knowing how far to trust them, and acting on them in real time.
+        </p>
+        <p>
+          Recent work includes <a href="/projects/">Pendulum Lab</a>, a long-form study that takes one
+          system from first-principles modelling through classical and learning-based identification,
+          Kalman filtering and underactuated control. Before that: multi-robot motion planning for my
+          thesis, and optical communication for autonomous underwater vehicles at NTNU.
+        </p>
+      </div>
+      <div class="about__cta">
+        <a class="btn btn--primary" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">Download CV (PDF)</a>
+        <a class="btn" href="mailto:viktor.degroote@gmail.com">Email</a>
+      </div>
+    </div>
+
+    <div class="about__side">
+      <h2 class="h3">Timeline</h2>
+      <ol class="timeline">
+        {timeline.map((t) => (
+          <li>
+            <span class="mono timeline__when">{t.when}</span>
+            <div>
+              <p class="timeline__what">{t.what}</p>
+              <p class="muted timeline__where">{t.where}</p>
+              <p class="timeline__note">{t.note}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+
+      <h2 class="h3">Tools</h2>
+      <p class="mono tools">Python · NumPy · JAX · PyTorch · MuJoCo · Gymnasium · Manim · MATLAB/Simulink · C++ · ROS · Linux · Git</p>
+
+      <h2 class="h3">Languages</h2>
+      <p class="mono tools">Dutch (native) · English (C1) · French (B2)</p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .about { display: grid; gap: var(--space-16); }
+  @media (min-width: 980px) { .about { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-24); } }
+  .about__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-8); }
+  .h3 { font-size: 1.1rem; margin-top: var(--space-10, 2.5rem); margin-bottom: var(--space-4); }
+  .about__side > .h3:first-child { margin-top: 0; }
+  .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-6); }
+  .timeline li { display: grid; gap: var(--space-2); grid-template-columns: 1fr; padding-top: var(--space-4); border-top: 1px solid var(--line); }
+  @media (min-width: 540px) { .timeline li { grid-template-columns: 9.5rem 1fr; gap: var(--space-4); } }
+  .timeline__when { font-size: .82rem; color: var(--fg-muted); padding-top: .25em; }
+  .timeline__what { font-weight: 600; }
+  .timeline__where { font-size: .95rem; }
+  .timeline__note { margin-top: .4em; font-size: .95rem; color: var(--fg-muted); line-height: 1.5; }
+  .tools { font-size: .88rem; color: var(--fg-muted); line-height: 1.8; }
+</style>

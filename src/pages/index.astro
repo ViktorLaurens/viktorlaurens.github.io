@@ -1,0 +1,95 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import PendulumHero from '../components/PendulumHero.astro';
+import ProjectCard from '../components/ProjectCard.astro';
+
+const projects = (await getCollection('projects'))
+  .sort((a, b) => a.data.order - b.data.order || b.data.date.valueOf() - a.data.date.valueOf());
+const featured = projects.filter((p) => p.data.featured).slice(0, 3);
+
+const themes = [
+  { k: 'Modelling', v: 'Equations of motion from first principles, written so a simulator and a controller can share them.' },
+  { k: 'Identification', v: 'Fitting parameters and structure to noisy data: regression, output error, Bayesian inference, SINDy, PINNs, Neural ODEs.' },
+  { k: 'Estimation', v: 'Real-time state from imperfect sensors: Kalman, extended and unscented filters, outlier gating, consistency checks.' },
+  { k: 'Control', v: 'Making it move: LQR, energy shaping, MPC, and reinforcement learning when the model runs out.' },
+];
+---
+<Base>
+  <section class="hero container">
+    <div class="hero__text">
+      <p class="eyebrow eyebrow--accent">Control · Learning · Robotics</p>
+      <h1>I build machines that understand their own dynamics.</h1>
+      <p class="lede">
+        I'm Viktor, an engineer from Brussels. I model dynamical systems, identify them from data,
+        estimate their state in real time, and make them move. This pendulum runs the same
+        equations as my lab notebook. Drag it. Then let the controller take over.
+      </p>
+      <div class="hero__cta">
+        <a class="btn btn--primary" href="/projects/">See the projects</a>
+        <a class="btn" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">Download CV</a>
+      </div>
+    </div>
+    <div class="hero__sim">
+      <PendulumHero />
+    </div>
+  </section>
+
+  <section class="section container">
+    <div class="section__head">
+      <h2>What I work on</h2>
+      <p class="eyebrow">one problem, four questions</p>
+    </div>
+    <dl class="themes">
+      {themes.map((t) => (
+        <div class="themes__item">
+          <dt>{t.k}</dt>
+          <dd>{t.v}</dd>
+        </div>
+      ))}
+    </dl>
+  </section>
+
+  {featured.length > 0 && (
+    <section class="section container">
+      <div class="section__head">
+        <h2>Selected projects</h2>
+        <a href="/projects/" class="muted">All projects →</a>
+      </div>
+      <div class="grid">
+        {featured.map((p) => <ProjectCard project={p} />)}
+      </div>
+    </section>
+  )}
+
+  <section class="section container">
+    <div class="contact">
+      <div>
+        <h2>Let's talk.</h2>
+        <p class="lede">Open to research collaborations and roles in control, learning and robotics.</p>
+      </div>
+      <div class="contact__links">
+        <a class="btn btn--primary" href="mailto:viktor.degroote@gmail.com">Email me</a>
+        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener">LinkedIn</a>
+        <a class="btn" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero { display: grid; gap: var(--space-12); padding-block: var(--space-12) var(--space-8); align-items: center; }
+  @media (min-width: 980px) {
+    .hero { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); padding-block: var(--space-16) var(--space-12); min-height: calc(100dvh - 64px); }
+  }
+  .hero__text { display: grid; gap: var(--space-6); }
+  .hero__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  .themes { margin: 0; display: grid; gap: var(--space-6); grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+  .themes__item { border-top: 1px solid var(--line-strong); padding-top: var(--space-4); }
+  .themes dt { font-weight: 600; font-size: 1.1rem; margin-bottom: var(--space-2); }
+  .themes dd { margin: 0; color: var(--fg-muted); line-height: 1.55; }
+  .contact { display: grid; gap: var(--space-8); align-items: center; padding: var(--space-12) var(--space-8); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  @media (min-width: 820px) { .contact { grid-template-columns: 1.3fr 1fr; } }
+  .contact__links { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  @media (min-width: 820px) { .contact__links { justify-content: flex-end; } }
+</style>
