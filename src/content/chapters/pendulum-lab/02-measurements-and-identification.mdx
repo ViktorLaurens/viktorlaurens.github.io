@@ -1,0 +1,858 @@
+---
+project: pendulum-lab
+number: 2
+title: "Measurements and classical identification"
+summary: "A sensor model with outliers, then four ways to recover the parameters from a recording: regression, SINDy, output-error least squares and Bayesian inference with MCMC."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 1 assumed we know the equation of motion *and* its parameters. A real pendulum
+only gives us measurements. This chapter asks: **from a noisy recording of the angle,
+how well can we recover the parameters of the model?**
+
+This is the first inverse problem of the report, and the one with the fewest unknowns (see
+the [storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)). The structure of the
+model comes from physics, or in section 2.3 from a library of physics-like terms; only its
+constant parameters are unknown; and the whole recording may be used, after the experiment.
+The model is also taken to be exact: the pendulum follows its equation, and only the
+measurements are noisy. Chapter 3 keeps the question but learns the structure as well.
+Chapter 5 drops the other two assumptions: it estimates the changing state while the
+pendulum swings, with a model that is allowed to be imperfect.
+
+To answer that honestly we simulate the measurements. Then the true parameters are known,
+and every method can be scored against them.
+
+The code is in `src/pendulum_lab/sensor.py`, the figures
+come from `scripts/make_figures.py`, and the animation from
+`animations/measurement_scenes.py`.
+
+## 2.1 The sensor model
+
+### What is measured
+
+We assume an angle sensor on the pivot, for example a 12-bit magnetic encoder, read by a
+microcontroller at a fixed sample rate $f_s$. It only measures the angle; the angular
+velocity $\dot\theta$ is **not** measured. Sample $k$ is taken at $t_k = \tfrac{k}{f_s}$, and the
+sensor reports
+
+$$
+y_k = Q\big(\theta(t_k) + b + v_k\big), \qquad k = 0, 1, \dots, N-1
+$$
+
+Three effects turn the true angle $\theta(t_k)$ into the reading $y_k$:
+
+**Offset $b$.** The sensor's zero is never mounted exactly at the bottom. The offset is
+constant, so it shifts every sample by the same amount. Unlike noise, it does not average
+out; it has to be estimated. It is identifiable because the physics fixes the hanging
+equilibrium at $\theta = 0$: wherever the measurements settle, that level is $b$.
+
+**Noise $v_k$, with outliers.** Most samples have small Gaussian noise with standard
+deviation $\sigma$ (electrical and magnetic noise). Occasionally, with probability
+$\varepsilon$, a sample is an **outlier**: a glitch such as a corrupted message, with a
+much larger spread $\sigma_\text{out}$. This is a *contamination model*, a mixture of two
+Gaussians:
+
+$$
+v_k \sim (1-\varepsilon)\thinspace\mathcal N(0, \sigma^2) + \varepsilon\thinspace\mathcal N(0, \sigma_\text{out}^2)
+$$
+
+Equivalently, a hidden coin flip $z_k \sim \text{Bernoulli}(\varepsilon)$ decides per sample
+which of the two Gaussians the noise comes from. In the simulation we keep $z_k$ as ground
+truth, so we can later check whether a method found the outliers; the methods never see it.
+
+**Quantization $Q$.** The encoder reports whole counts, so the reading is rounded to a
+multiple of its resolution $\Delta$:
+
+$$
+Q(x) = \Delta \cdot \mathrm{round}\left(\frac{x}{\Delta}\right), \qquad \Delta = \frac{2\pi}{4096} \approx 0.088^\circ
+$$
+
+Because the noise is much larger than one count, the rounding error behaves like extra
+uniform noise on $\left[{-\tfrac{\Delta}{2}},\ \tfrac{\Delta}{2}\right]$ with standard deviation
+$\tfrac{\Delta}{\sqrt{12}} \approx 0.025^\circ$, negligible next to $\sigma$.
+
+The default values:
+
+| Quantity | Symbol | Value |
+|---|---|---|
+| Sample rate | $f_s$ | $100\ \text{Hz}$ |
+| Gaussian noise | $\sigma$ | $0.5^\circ$ |
+| Outlier probability | $\varepsilon$ | 1% |
+| Outlier spread | $\sigma_\text{out}$ | $15^\circ$ |
+| Mounting offset | $b$ | $1.5^\circ$ |
+| Resolution (12 bit) | $\Delta$ | $0.088^\circ$ |
+
+### The reference experiment
+
+All identification methods in this chapter are tested on the same recording: the pendulum
+of chapter 1 released at rest from a large angle, so that the $\sin\theta$ nonlinearity
+matters, and recorded long enough for the damping to show.
+
+| | Value |
+|---|---|
+| True parameters | $\omega_0^2 = \tfrac{g}{L} = 9.81\ \text{s}^{-2}$, $\mu = 0.2\ \text{s}^{-1}$ |
+| Initial state | $\theta_0 = 120^\circ$, $\dot\theta_0 = 0\ \text{rad/s}$ |
+| Recording | 20 s at $100\ \text{Hz}$: 2000 samples, of which 28 are outliers (seed 0) |
+
+**The recording is treated as real data.** It was generated once and frozen in
+`data/reference/`, and every method loads exactly those numbers, so
+results can be compared honestly. The folder separates what an experimenter would have
+from what only the simulation knows:
+
+| File | Contents | Used for |
+|---|---|---|
+| `measurements.csv` | sample times $t_k$ and readings $y_k$ | identification |
+| `metadata.json` | sample rate and encoder resolution | identification |
+| `truth/ground_truth.csv` | true $\theta$, $\dot\theta$ and outlier flags $z_k$ | scoring only |
+| `truth/truth.json` | true parameters, initial state, sensor settings | scoring only |
+
+Each file carries a fingerprint (a SHA-256 hash of its numbers) that is checked on every
+load, so a changed dataset is detected instead of silently skewing a comparison.
+
+<Figure video="/media/pendulum-lab/sensor_measurement.mp4" width={100} alt="Pendulum with the sensor reading, the measurements appearing over time, and the measurement error">
+
+Reference experiment, first 10 s: true angle (blue), measurements (yellow), outliers (red)
+
+</Figure>
+
+The full recording, with the measurement error $y_k - \theta(t_k)$ zoomed in below:
+
+<Figure src="/media/pendulum-lab/sensor_measurements.png" width={100} alt="Full reference recording and its measurement error">
+
+Lower panel: outliers within the zoomed range are circles; those off scale are triangles at the edge, pointing toward the side they fall on
+
+</Figure>
+
+At the scale of the swing, the Gaussian noise is invisible and the offset hardly shows.
+Only the outliers stand out. Zoomed in, the measurements form a band of width about
+$\pm 2\sigma = \pm 1^\circ$, centered on the offset $b = 1.5^\circ$ instead of on zero.
+
+### Why outliers matter so much
+
+The variance of the noise is
+
+$$
+\mathrm{Var}(v_k) = (1-\varepsilon)\thinspace\sigma^2 + \varepsilon\thinspace\sigma_\text{out}^2
+= 0.99 \cdot (0.5^\circ)^2 + 0.01 \cdot (15^\circ)^2 \approx 0.25 + 2.25 = 2.50\ \mathrm{deg}^2 ,
+$$
+
+a standard deviation of $1.58^\circ$. **1% of the samples cause 90% of the variance.**
+
+The distribution makes the problem visible. On a logarithmic scale, the sensor's error is
+a sharp peak with wide, heavy tails. A Gaussian with the same variance (dashed) gets both
+wrong: it is far too wide in the middle and far too thin in the tails.
+
+<Figure src="/media/pendulum-lab/sensor_noise_distribution.png" width={85} alt="Distribution of the measurement error: sharp Gaussian peak with heavy outlier tails, compared with a Gaussian of equal variance">
+
+Error distribution of the sensor, from one million simulated samples of a still pendulum
+
+</Figure>
+
+This matters for identification. Least squares minimizes $\sum_k (y_k - \hat y_k)^2$, which
+is the right thing to do *only* for Gaussian noise (it is then the maximum-likelihood
+estimate). With squared errors, a single $30^\circ$ outlier weighs as much as
+$\left(\tfrac{30}{0.5}\right)^2 = 3600$ ordinary samples. Section 2.3 will show how much that biases the
+estimate, and how a robust loss fixes it.
+
+### What the model leaves out
+
+Real recordings can also have missing samples, timing jitter, an angle that wraps around
+at $\pm 180^\circ$, and dynamics that differ from the model (for example dry friction at the
+pivot). These are easy to add later; for now the data stays evenly sampled, which keeps
+the methods in the next sections simple.
+
+### The identification problem
+
+Everything that is unknown about the experiment is collected in one vector:
+
+$$
+p = \big(\omega_0^2,\ \mu,\ \theta_0,\ \dot\theta_0,\ b\big)
+$$
+
+The task for the rest of this chapter: **given only $y_0, \dots, y_{N-1}$, estimate $p$**,
+together with an honest statement of how uncertain that estimate is.
+
+## 2.2 Regression on the equation of motion
+
+The code is in `src/pendulum_lab/derivatives.py` and
+`src/pendulum_lab/regression.py`; every number in this
+section comes from `scripts/evaluate_regression.py`.
+
+### The idea: the model is linear in its parameters
+
+The equation of motion $\ddot\theta = -\omega_0^2 \sin\theta - \mu\dot\theta$ is nonlinear in
+$\theta$, but **linear in the parameters**. Written as a row times a column, it reads
+
+$$
+\ddot\theta =
+\underset{\text{computed from data}}{\underbrace{\begin{bmatrix} {-\sin\theta} & {-\dot\theta} \end{bmatrix}}}
+\underset{\text{unknown}}{\underbrace{\begin{bmatrix} \omega_0^2 \cr \mu \end{bmatrix}}}
+$$
+
+Everything nonlinear, like the $\sin\theta$, lives in the row, and only involves the
+signal, which we can evaluate at every sample. The parameters sit in the column and only
+ever multiply those known functions. So each sample gives one *linear* equation in the
+unknowns, and many samples give an overdetermined linear system: exactly what ordinary
+least squares solves.
+
+The sensor gives $y = \theta + b$ rather than $\theta$, and the offset $b$ sits inside the
+sine. The angle-addition formula pulls it out exactly:
+
+$$
+\sin\theta = \sin(y - b) = \sin y \cos b - \cos y \sin b
+$$
+
+Because $b$ is constant, $\ddot y = \ddot\theta$ and $\dot y = \dot\theta$, so
+
+$$
+\ddot y = -c_1 \sin y + c_2 \cos y - \mu \dot y,
+\qquad c_1 = \omega_0^2 \cos b, \quad c_2 = \omega_0^2 \sin b ,
+$$
+
+or, in the same row-times-column form, with one more known function in the row:
+
+$$
+\ddot y =
+\begin{bmatrix} {-\sin y} & \cos y & {-\dot y} \end{bmatrix}
+\begin{bmatrix} c_1 \cr c_2 \cr \mu \end{bmatrix}
+$$
+
+The offset has disappeared into the coefficients, with no approximation. Writing this
+equation once for every sample $k$ and stacking the rows gives the regression problem
+$\mathbf d = \Phi\boldsymbol\beta$:
+
+$$
+\underset{\mathbf d}{\underbrace{\begin{bmatrix} \ddot y_0 \cr \ddot y_1 \cr \vdots \cr \ddot y_{N-1} \end{bmatrix}}} =
+\underset{\Phi}{\underbrace{\begin{bmatrix}
+{-\sin y_0} & \cos y_0 & {-\dot y_0} \cr
+{-\sin y_1} & \cos y_1 & {-\dot y_1} \cr
+\vdots & \vdots & \vdots \cr
+{-\sin y_{N-1}} & \cos y_{N-1} & {-\dot y_{N-1}}
+\end{bmatrix}}}
+\underset{\boldsymbol\beta}{\underbrace{\begin{bmatrix} c_1 \cr c_2 \cr \mu \end{bmatrix}}}
+$$
+
+With 2000 samples this is 2000 equations for 3 unknowns. The least-squares solution and
+the parameters follow directly:
+
+$$
+\hat{\boldsymbol\beta} = \left(\Phi^\top \Phi\right)^{-1} \Phi^\top \mathbf d,
+\qquad \hat\omega_0^2 = \sqrt{c_1^2 + c_2^2}, \qquad \hat b = \mathrm{atan2}(c_2, c_1)
+$$
+
+One linear solve, no iterations, no initial guess, and the initial state
+$(\theta_0, \dot\theta_0)$ is not even needed. **The catch:** the regression needs
+$\dot y$ and $\ddot y$, and we only measure $y$. Everything below is about estimating
+derivatives from noisy samples.
+
+### Attempt 1: finite differences
+
+The textbook approximations, with sample spacing $h = 0.01\ \text{s}$:
+
+$$
+\dot y_k \approx \frac{y_{k+1} - y_{k-1}}{2h},
+\qquad
+\ddot y_k \approx \frac{y_{k+1} - 2y_k + y_{k-1}}{h^2}
+$$
+
+Dividing by $h^2$ is the problem. If each sample carries independent noise with standard
+deviation $\sigma$, the second difference carries noise with standard deviation
+
+$$
+\sigma_{\ddot y} = \frac{\sqrt{1 + 4 + 1}\thinspace\sigma}{h^2} = \frac{\sqrt 6\thinspace\sigma}{h^2} \approx 214\ \text{rad/s}^2
+$$
+
+for $\sigma = 0.5^\circ$, against a signal of about $10\ \text{rad/s}^2$. With the outliers
+included it is $936\ \text{rad/s}^2$. The estimate is useless: $\omega_0^2$ comes out
+675% too large. The noise also enters $\Phi$ through $\dot y$, and noisy regressors bias
+least squares rather than merely making it noisy (the *errors-in-variables* problem).
+
+### Attempt 2: Savitzky–Golay differentiation
+
+Instead of differencing neighbours, fit a low-order polynomial to a short window of samples
+by least squares, and take the derivatives of that polynomial at the window's center. We
+use a cubic over $n = 25$ samples ($0.25\ \text{s}$), and slide the window along the signal:
+
+<Figure video="/media/pendulum-lab/savitzky_golay_window.mp4" width={100} alt="A cubic fitted in a sliding window over the measurements; its slope and curvature at the center trace out the velocity and acceleration estimates">
+
+Each position of the window gives one estimate of $\dot\theta$ and $\ddot\theta$
+
+</Figure>
+
+Because the fit is linear in the data, every derivative estimate is a fixed weighted sum
+of the samples in the window, $\ddot y_k = \sum_j c_j\thinspace y_{k+j}$. The noise therefore
+becomes $\sigma \lVert \mathbf c \rVert = 0.75\ \text{rad/s}^2$, about **285 times less** than
+finite differences:
+
+<Figure src="/media/pendulum-lab/regression_derivatives.png" width={100} alt="Angle, velocity and acceleration: finite differences are dominated by noise, Savitzky-Golay follows the truth">
+
+Reference data, $2\ \text{s} \le t \le 5\ \text{s}$; offset $b$ removed in the top panel for comparison
+
+</Figure>
+
+**Choosing the window.** A longer window averages more noise away but also flattens the
+curve it fits. We fix it *before* looking at any result: about a tenth of the swing period
+(which is $2$ to $2.7\ \text{s}$ here). Tuning it by comparing with the true parameters would
+be cheating in a benchmark.
+
+### Outliers become waves
+
+Savitzky–Golay is linear, so an outlier of size $e$ adds $e\thinspace c_j$ to every estimate
+whose window contains it: it is smeared into a wave the width of the window.
+
+<Figure src="/media/pendulum-lab/regression_outlier_effect.png" width={100} alt="Second derivative near three outliers: Savitzky-Golay on raw data shows large waves, rejecting outliers first removes them">
+
+Reference data, $5.5\ \text{s} \le t \le 7\ \text{s}$; red lines mark the outliers
+
+</Figure>
+
+### Attempt 3: reject the outliers first
+
+Outliers are rare and large, so they stand out from a smooth curve. Each pass of the
+rejection:
+
+1. smooths the current signal (Savitzky–Golay, same window) and computes the residuals
+   $r_k = y_k - \hat y_k$;
+2. estimates the noise level robustly with the median absolute deviation,
+   $s = 1.4826 \cdot \mathrm{median}_k \left| r_k - \mathrm{median}(r) \right|$, which the
+   outliers barely affect (the factor makes $s = \sigma$ for Gaussian noise);
+3. flags every sample with $|r_k| \gt 4s$ and replaces it by interpolating its unflagged
+   neighbours, so the next pass's smooth curve is no longer pulled toward it.
+
+After three passes it flags 27 samples on the reference data, **all 27 real outliers, with
+no false alarms**. The one it misses has an error of $1.74^\circ$, which is indistinguishable
+from ordinary noise and does no harm.
+
+### Results on the reference data
+
+| Method | $\hat\omega_0^2$ | error | $\hat\mu$ | error | $\hat b$ |
+|---|---|---|---|---|---|
+| Finite differences | 76.00 | +675% | 0.483 | +142% | $5.22^\circ$ |
+| Savitzky–Golay | 9.780 | $-0.3$% | 0.195 | $-2.3$% | $1.53^\circ$ |
+| Outlier rejection + Savitzky–Golay | 9.721 | $-0.9$% | 0.197 | $-1.3$% | $1.50^\circ$ |
+| truth | 9.810 | | 0.200 | | $1.50^\circ$ |
+
+On this one dataset, rejecting outliers looks like a mixed result: better $\mu$ and $b$,
+slightly worse $\omega_0^2$. One dataset cannot tell which differences are real.
+
+### Bias and variance: repeating the experiment
+
+To separate systematic error from luck, we repeat the whole method on 200 *new* datasets
+from the same experiment and sensor (different noise, same physics). The frozen dataset
+remains the benchmark; this studies the method itself. At the chosen window:
+
+| Method | error in $\hat\omega_0^2$ | error in $\hat\mu$ |
+|---|---|---|
+| Savitzky–Golay | $-0.60 \pm 0.21$% | $-1.73 \pm 0.88$% |
+| Outlier rejection + Savitzky–Golay | $-0.93 \pm 0.05$% | $-1.19 \pm 0.25$% |
+
+(mean $\pm$ standard deviation). Rejecting outliers makes the estimate **about four times
+more repeatable**. What remains is a **systematic bias**: smoothing flattens the oscillation,
+so the curvature, and with it $\omega_0^2$, comes out slightly too small. Sweeping the window
+length shows the trade-off:
+
+<Figure src="/media/pendulum-lab/regression_window_sweep.png" width={100} alt="Parameter error versus window length: bias grows with the window, outlier rejection removes most of the spread">
+
+Mean (line) and standard deviation (band) over 100 new datasets; dashed: the chosen $0.25\ \text{s}$
+
+</Figure>
+
+The bias grows with the window. Short windows are only usable *after* rejecting outliers,
+and then they are nearly unbiased. But the best window can only be read off this plot
+because we know the truth; with real data there is no such plot.
+
+### What we learned
+
+- Equation-error regression is fast and needs no initial guess, which makes it an excellent
+  **first estimate** for the slower methods that follow.
+- Its weak point is differentiation: **the accuracy is set by how well we can estimate
+  $\dot y$ and $\ddot y$, not by the regression itself.**
+- Outliers must be removed *before* differentiating; afterwards about 1% of smoothing
+  bias remains, and no window choice removes it without knowing the answer.
+
+Both observations point to the next methods: SINDy keeps the regression but asks *which*
+terms belong in the equation, and output-error least squares avoids differentiation
+altogether by simulating the model and comparing it with $y$ directly.
+
+## 2.3 SINDy: discovering the equation from data
+
+So far we assumed the *form* of the equation and only estimated its numbers. What if we
+did not know that the restoring term is a sine, or what kind of friction acts on the
+pendulum? **SINDy** (Sparse Identification of Nonlinear Dynamics; Brunton, Proctor and
+Kutz, 2016) keeps the regression of section 2.2 but lets the data choose the terms.
+
+The code is in `src/pendulum_lab/sindy.py`; the numbers come
+from `scripts/evaluate_sindy.py`.
+
+### A library of candidate terms
+
+Instead of one row $\big[{-\sin y},\ \cos y,\ {-\dot y}\big]$ we offer a whole library of
+plausible terms, and give every true term some serious competition:
+
+$$
+\Theta(y, \dot y) = \begin{bmatrix}
+1 & y & y^2 & y^3 & \sin y & \cos y & \dot y & \dot y^2 & \dot y^3 & \dot y|\dot y| & \mathrm{sign}\thinspace\dot y & y\dot y
+\end{bmatrix}.
+$$
+
+- $\sin y$ competes with the polynomials $y$, $y^2$, $y^3$. A Taylor series says
+  $\sin y \approx y - \tfrac{1}{6}y^3$, so this is a real contest.
+- Viscous damping $\dot y$ competes with quadratic air drag $\dot y|\dot y|$ and dry
+  (Coulomb) friction $\mathrm{sign}\thinspace\dot y$, the three standard friction models.
+- The constant $1$ and $\cos y$ are where a sensor offset shows up (section 2.2).
+
+The model is $\ddot y = \Theta(y, \dot y)\thinspace\boldsymbol\xi$ with twelve coefficients, most
+of which should be zero. In this basis the truth is
+$\xi_{\sin y} = -\omega_0^2 \cos b = -9.807$, $\xi_{\cos y} = \omega_0^2 \sin b = 0.257$ and
+$\xi_{\dot y} = -\mu = -0.2$, with all other coefficients zero.
+
+<Figure src="/media/pendulum-lab/sindy_library.png" width={100} alt="The twelve candidate functions over time on the reference data, with sin y and the angular velocity highlighted">
+
+The candidate terms on the reference data; highlighted: the terms SINDy selects
+
+</Figure>
+
+### Sparse regression
+
+Ordinary least squares would use all twelve terms. **Sequentially thresholded least
+squares** (STLSQ) forces most of them to zero:
+
+1. scale every column of $\Theta$ to unit RMS, so that a coefficient measures how much its
+   term *contributes*, independent of units;
+2. fit all coefficients by least squares;
+3. set every coefficient smaller than a threshold $\lambda$ to zero;
+4. refit the surviving terms, and repeat steps 3 and 4 until nothing changes.
+
+As $\lambda$ rises, weak terms drop out one by one, and the remaining ones are refitted to
+take over their work:
+
+<Figure video="/media/pendulum-lab/sindy_threshold.mp4" width={100} alt="A threshold rising through the candidate terms; terms below it are pruned and the equation simplifies">
+
+Reference data, derivatives as in section 2.2
+
+</Figure>
+
+### Choosing the threshold without knowing the answer
+
+Every $\lambda$ gives a different equation, so which one should we believe? We fit on the
+first 10 s, and test each candidate equation on the last 10 s by **simulating it** from
+the smoothed state at $t = 10\ \text{s}$ and comparing the trajectory with the measurements.
+
+Why simulate, rather than compare $\ddot y$ directly? Because the estimated $\ddot y$ is
+noisy, and that noise is the same for every model: all equations fit it about equally
+badly. A wrong term, however, changes how the motion *evolves*, and integrating over many
+swings turns a small error in the equation into a visible drift in the trajectory.
+
+<Figure src="/media/pendulum-lab/sindy_threshold_sweep.png" width={90} alt="Number of terms and validation error against the threshold, with a clear minimum at two terms">
+
+Reference data; the dot marks the selected threshold
+
+</Figure>
+
+| Model size | Best validation error | Terms |
+|---|---|---|
+| 10 terms | $2.84^\circ$ | nearly every candidate |
+| 3 terms | $3.50^\circ$ | $\sin y$, $\dot y^3$, $\dot y\lvert\dot y\rvert$ |
+| **2 terms** | $\mathbf{2.13^\circ}$ | $\sin y$, $\dot y$ |
+| 1 term | $12.10^\circ$ | $\sin y$ |
+
+<Figure src="/media/pendulum-lab/sindy_validation.png" width={100} alt="Three discovered equations simulated over the held-out ten seconds: without damping the oscillation never decays">
+
+The held-out half of the reference recording, with three discovered equations simulated from $t = 10\ \text{s}$
+
+</Figure>
+
+Without a damping term the simulated swing never decays. With ten terms the fit on the
+training data is excellent, but the extra terms partly cancel each other and the
+trajectory drifts. The two-term model wins. Refitting its two terms on all the data gives
+
+$$
+\ddot y = -9.706\sin y - 0.2004\thinspace\dot y ,
+$$
+
+so $\hat\omega_0^2 = 9.706$ ($-1.1$% error) and $\hat\mu = 0.2004$ ($+0.2$%). **SINDy picked
+the sine over the polynomials and viscous damping over air drag and dry friction**, from
+noisy, outlier-ridden data, without being told the equation.
+
+It did miss one thing: the offset. Its $\cos y$ term contributes too little to survive the
+threshold, so the discovered model swings about $y = 0$ rather than about $b = 1.5^\circ$.
+That is visible in the validation plot, and it is why section 2.4 will estimate $b$
+explicitly.
+
+### Small swings: a good fit is not a correct model
+
+Chapter 1 showed that for small angles $\sin\theta \approx \theta$. What does that mean for
+discovery? We froze a second recording, `data/small_swing/`: the same
+pendulum and sensor, released from only $20^\circ$. SINDy now returns
+
+$$
+\ddot y = 576.9 - 1872\thinspace y - 286.2\thinspace y^2 + 306.6\thinspace y^3 + 1862\sin y - 576.7\cos y - 0.209\thinspace\dot y^3 - 0.046\thinspace\mathrm{sign}\thinspace\dot y .
+$$
+
+Huge coefficients that nearly cancel, no viscous damping at all, and no threshold gives
+fewer than six terms. Yet its validation error, $1.64^\circ$, is *better* than that of the
+correct model on the large swing.
+
+The reason is that on $|y| \le 20^\circ$ the candidate columns are almost linearly
+dependent: $\sin y$ agrees with $y - \tfrac{1}{6}y^3$ to within 0.013%, and
+$\cos y$ with $1 - \tfrac{1}{2}y^2$ to within 0.07%. Countless combinations of them describe
+the data equally well, and noise decides which one comes out. The **condition number** of
+the scaled library measures exactly this:
+
+| Recording | Condition number | Discovered structure |
+|---|---|---|
+| Large swing ($120^\circ$) | 323 | $\sin y$, $\dot y$: correct |
+| Small swing ($20^\circ$) | 449 554 | eight terms, physically meaningless |
+
+<Figure src="/media/pendulum-lab/sindy_identifiability.png" width={100} alt="Coefficients discovered from the large and the small swing next to the true coefficients, on a symmetric log scale">
+
+Coefficients found on each recording (symmetric log scale), with the true values
+
+</Figure>
+
+**Whether the structure of a model can be identified is decided when the experiment is
+designed, not when the data is analysed.** The data must excite the behaviour that tells
+the candidates apart, here a large swing. A low validation error alone proves nothing;
+the condition number is a cheap check that should always come with it.
+
+### What we learned
+
+- SINDy turns system identification into *model discovery*: from data alone it found
+  $\sin y$ and viscous damping among twelve candidates.
+- The sparsity threshold should be chosen by simulating the candidate equations on
+  held-out data, not by how well they fit the derivatives.
+- Terms that contribute little, like the offset here, fall below the threshold and are
+  lost.
+- With data that does not excite the nonlinearity, discovery fails *silently*: the model
+  fits well and means nothing. Check the conditioning of the library.
+
+## 2.4 Output-error least squares: fitting the simulation
+
+The code is in `src/pendulum_lab/output_error.py`; the
+numbers come from `scripts/evaluate_output_error.py`.
+
+### Fit the simulation, not the derivatives
+
+Sections 2.2 and 2.3 differentiated the data to match the model, and every remaining error
+came from that differentiation. The classical alternative works the other way around:
+**integrate the model and compare it with the data.** For a candidate parameter vector
+
+$$
+p = \big(\omega_0^2,\ \mu,\ \theta_0,\ \dot\theta_0,\ b\big)
+$$
+
+we simulate the pendulum from $(\theta_0, \dot\theta_0)$, add the offset, and get the
+predicted measurements $\hat y_k(p) = \theta(t_k; p) + b$. The estimate is the $p$ that makes
+the prediction closest to what the sensor reported:
+
+$$
+\hat p = \arg\min_p \sum_{k=0}^{N-1} \rho\big(y_k - \hat y_k(p)\big).
+$$
+
+No derivatives of the data appear anywhere, so the smoothing bias of section 2.2
+disappears. The price: every evaluation of the cost integrates the ODE, the problem is
+nonlinear in $p$, and the optimizer needs a starting point. We start from the result of
+section 2.2, which is already within $1$% of the answer and costs one linear solve.
+
+### How the optimizer finds $\hat p$
+
+Near the current guess, the prediction is approximately linear in a parameter change
+$\boldsymbol\delta$:
+
+$$
+\hat{\mathbf y}(p + \boldsymbol\delta) \approx \hat{\mathbf y}(p) + J\boldsymbol\delta,
+\qquad J_{kj} = \frac{\partial \hat y_k}{\partial p_j} .
+$$
+
+Each column of the Jacobian $J$ says how the whole simulated trajectory moves when one
+parameter changes; we compute it by finite differences, one extra simulation per
+parameter. Solving the linearized problem for $\boldsymbol\delta$ is ordinary least
+squares again, as in section 2.2, and repeating it is the Gauss–Newton method. SciPy's
+`least_squares` adds a trust region, so that no single step goes further than the
+linearization can be trusted. Starting from a deliberately poor guess:
+
+<Figure video="/media/pendulum-lab/output_error_fit.mp4" width={100} alt="The simulated trajectory is pulled onto the measurements iteration by iteration while the residual drops and the parameters converge">
+
+Robust output-error fit of the reference data, started from $\omega_0^2 = 5$, $\mu = 0.05$, $\theta_0 = 1.5$, $\dot\theta_0 = 0$, $b = 0$
+
+</Figure>
+
+Twenty-one improving steps take the RMS residual from $58^\circ$ to $2.2^\circ$ (the outliers
+keep it above the $0.5^\circ$ sensor noise). Along the way the optimizer wanders, through a
+damping seven times too large and a starting angle past upright, before it finds the valley.
+Started from the regression estimate instead, it needs only 8 evaluations.
+
+### Least squares is maximum likelihood, for Gaussian noise
+
+Why minimize the sum of *squares*? If the noise is Gaussian with standard deviation
+$\sigma$, the probability of the observed data given $p$ is
+
+$$
+\mathcal L(p) = \prod_k \frac{1}{\sigma\sqrt{2\pi}} \exp\left({-\frac{\big(y_k - \hat y_k(p)\big)^2}{2\sigma^2}}\right),
+\qquad
+-\log\mathcal L(p) = \frac{1}{2\sigma^2}\sum_k \big(y_k - \hat y_k(p)\big)^2 + \text{const}.
+$$
+
+Maximizing the likelihood is minimizing the sum of squares: with $\rho(r) = r^2$, the fit
+is the **maximum-likelihood estimate**. But our noise is *not* Gaussian (section 2.1): its
+outliers would be wildly improbable under a Gaussian, so least squares works hard to
+accommodate them. A **robust loss** grows quadratically for ordinary residuals and only
+linearly for large ones. We use the soft-L1 loss with scale $c$:
+
+$$
+\rho(r) = 2c^2\left(\sqrt{1 + \left(\tfrac{r}{c}\right)^2} - 1\right) \approx
+\begin{cases} r^2 & \lvert r\rvert \ll c \cr 2c\lvert r\rvert & \lvert r\rvert \gg c \end{cases}
+$$
+
+We set $c = 3\hat\sigma$, where the noise level $\hat\sigma$ is estimated before fitting,
+without any model, from the second differences of the data:
+$\hat\sigma = \tfrac{1.4826}{\sqrt 6}\thinspace\mathrm{MAD}\left(y_{k+1} - 2y_k + y_{k-1}\right) = 0.532^\circ$
+(true: $0.5^\circ$). Residuals up to about $3\hat\sigma$ count as ordinary noise; an
+outlier of $30^\circ$ now weighs like about 355 ordinary samples instead of 3600, ten
+times less.
+
+<Figure src="/media/pendulum-lab/output_error_fit.png" width={100} alt="The robust fit on the reference data, and residuals that stay within the noise band apart from the outliers">
+
+Reference data with the robust fit; below, the residuals with the $\pm 2\hat\sigma$ band
+
+</Figure>
+
+On the reference data, with 95% confidence intervals (computed below):
+
+| | Ordinary least squares | Robust (soft-L1) | Truth |
+|---|---|---|---|
+| $\omega_0^2$ | $9.8127 \pm 0.0073$ | $9.8096 \pm 0.0018$ | $9.8100$ |
+| $\mu$ | $0.2002 \pm 0.0010$ | $0.20015 \pm 0.00025$ | $0.2000$ |
+| $\theta_0$ [rad] | $2.0965 \pm 0.0068$ | $2.0943 \pm 0.0017$ | $2.0944$ |
+| $\dot\theta_0$ [rad/s] | ${-0.005} \pm 0.027$ | $0.001 \pm 0.007$ | $0$ |
+| $b$ [rad] | $0.0263 \pm 0.0017$ | $0.0261 \pm 0.0004$ | $0.0262$ |
+| noise estimate $\hat\sigma$ | $2.21^\circ$ | $0.52^\circ$ | $0.5^\circ$ |
+
+Both fits contain the truth in every interval. The errors are tiny compared with section
+2.2: $\hat\omega_0^2$ is off by $+0.028$% and $-0.004$%, against $-0.9$% for equation
+regression. The difference between the two losses is the size of the intervals: the
+outliers make ordinary least squares believe the noise is $2.2^\circ$, and its intervals
+are four times wider.
+
+### Accuracy and precision over repeated experiments
+
+One dataset cannot separate a good method from a lucky one, so we again repeat each
+method on 200 new datasets of the same experiment:
+
+<Figure src="/media/pendulum-lab/output_error_precision.png" width={100} alt="Error distributions over 200 repeated experiments: regression is biased, ordinary least squares is unbiased but spread out, robust least squares is unbiased and tight">
+
+Each dot is one repeated experiment; vertical bars mark the mean
+
+</Figure>
+
+| Method | error in $\hat\omega_0^2$ | error in $\hat\mu$ |
+|---|---|---|
+| Equation regression (2.2) | $-0.93 \pm 0.05$% | $-1.19 \pm 0.25$% |
+| Output error, ordinary least squares | $0.000 \pm 0.026$% | $0.000 \pm 0.188$% |
+| Output error, robust | $0.000 \pm 0.009$% | $0.000 \pm 0.066$% |
+
+(mean $\pm$ standard deviation). This figure is the clearest summary of the chapter so
+far, and of two words that are easily confused:
+
+- **Accuracy** is about bias: regression is systematically off; both output-error fits are
+  centered on the truth.
+- **Precision** is about spread: the outliers do not bias ordinary least squares here
+  (they are symmetric), but they make it **three times less precise** than the robust fit.
+
+### Honest error bars
+
+Near the optimum the linearization also gives the uncertainty. If the noise has standard
+deviation $\sigma$, the estimate is approximately Gaussian with covariance
+
+$$
+\mathrm{Cov}\big(\hat p\big) \approx \hat\sigma^2 \left(J^\top J\right)^{-1},
+$$
+
+and $\hat p_j \pm 1.96\sqrt{\mathrm{Cov}_{jj}}$ is a 95% confidence interval. For the robust
+loss, `least_squares` returns a Jacobian in which the outliers are already down-weighted, and
+$\hat\sigma$ is the robust spread (median absolute deviation) of the residuals.
+
+Are these intervals honest, in the sense that they contain the truth 95% of the time?
+Over the 200 repeated experiments:
+
+| Method | $\omega_0^2$ | $\mu$ | $\theta_0$ | $\dot\theta_0$ | $b$ |
+|---|---|---|---|---|---|
+| Ordinary least squares | 96% | 94% | 96% | 94% | 94% |
+| Robust | 98% | 95% | 96% | 96% | 96% |
+
+Yes. The intervals from a *single* fit predict the spread of many. The two estimates are
+also correlated: the region predicted for $(\hat\omega_0^2, \hat\mu)$ is a tilted ellipse,
+and the repeated estimates fill it.
+
+<Figure src="/media/pendulum-lab/output_error_uncertainty.png" width={75} alt="Scatter of 200 robust estimates of omega0 squared and mu inside the 95 percent ellipse predicted by one fit">
+
+The 95% region from the Jacobian of one robust fit, and 200 repeated estimates
+
+</Figure>
+
+The correlation of $-0.39$ is physical: a slightly higher frequency can be partly traded
+for slightly less damping when matching the measured decay.
+
+An earlier version of this method set the robust scale to $c = \hat\sigma$. Then ordinary
+samples were down-weighted too, and the intervals contained the truth 99 to 100% of the
+time: too wide. Checking coverage on repeated experiments is how such mistakes are found.
+
+### Local minima and the starting guess
+
+The cost is not convex in $p$. Varying only $\omega_0^2$ (other parameters at the optimum)
+shows one deep valley and, far from it, a nearly flat plateau with shallow dips:
+
+<Figure src="/media/pendulum-lab/output_error_landscape.png" width={100} alt="Cost along omega0 squared: one deep valley and a flat plateau with small dips; arrows show where fifteen starting guesses converge">
+
+Arrows: fifteen fits started from $\omega_0^2 \in \lbrace 2, 5, 20, 40, 55 \rbrace$ and three different $\theta_0$
+
+</Figure>
+
+Ordinary least squares reached the true $\omega_0^2$ from all fifteen starts. The robust fit
+reached it from fourteen; started from $\omega_0^2 = 55$, $\theta_0 = 0.5$ it stopped at
+$\omega_0^2 = 63.9$. The robust loss is the reason: far from the answer most residuals are
+large, the loss grows only linearly there, and the plateau gives the optimizer little slope
+to follow. Two habits make this harmless:
+
+- **Start from a cheap estimate.** The equation regression of section 2.2 lands in the
+  valley every time.
+- **Check the residuals.** The stuck fit reports a noise level of $31.8^\circ$, sixty times
+  the sensor noise: a fit that does not describe the data is easy to recognize.
+
+### What we learned
+
+- Fitting the simulated model to the data avoids differentiation, and with it the bias:
+  output error is about **100 times more accurate** than equation regression here.
+- Least squares is maximum likelihood for Gaussian noise. Outliers break that assumption;
+  a robust loss restores the precision, three times better on this sensor.
+- The Jacobian gives **honest error bars** from a single dataset, verified by coverage on
+  repeated experiments.
+- The problem is non-convex. Equation regression is the natural starting point, and a
+  residual far above the sensor noise flags a failed fit.
+
+## 2.5 Bayesian inference: the full posterior with MCMC
+
+The code is in `src/pendulum_lab/bayes.py`; the numbers come
+from `scripts/evaluate_bayes.py`.
+
+### From one best estimate to a distribution
+
+Section 2.4 produced a best estimate and error bars. Both are summaries of one object, the
+**posterior distribution**: how plausible every parameter vector is, given the data. Bayes'
+theorem gives it as
+
+$$
+p(q \mid \mathbf y) \propto p(\mathbf y \mid q)\thinspace p(q),
+$$
+
+the **likelihood** (how probable the measurements are if $q$ were true) times the **prior**
+(what we believed before measuring). Output-error least squares found the peak of this
+distribution and described its shape with a Gaussian built from the Jacobian. Markov chain
+Monte Carlo (MCMC) draws samples from the posterior itself, with no assumption about its
+shape. Comparing the two answers the question left open by section 2.4: **when are the
+cheap Jacobian error bars good enough?**
+
+### The likelihood: heavy-tailed noise, learned from the data
+
+The likelihood needs a model of the noise, and section 2.1 showed that the noise has heavy
+tails. Instead of copying the exact sensor model (which a real experimenter would not
+know), we use the standard robust choice, a **Student-t distribution** of the residuals
+$r_k = y_k - \hat y_k(q)$:
+
+$$
+p(r_k) = \frac{\Gamma\left(\tfrac{\nu + 1}{2}\right)}{\Gamma\left(\tfrac{\nu}{2}\right)\sqrt{\nu\pi}\thinspace\sigma}
+\left(1 + \frac{r_k^2}{\nu\sigma^2}\right)^{-\frac{\nu + 1}{2}} .
+$$
+
+The tail weight $\nu$ controls how often large residuals are expected: for $\nu \to \infty$
+this is a Gaussian, for small $\nu$ outliers are routine. Both the scale $\sigma$ and $\nu$
+are sampled along with the physics, so the full parameter vector is
+$q = \big(\omega_0^2,\ \mu,\ \theta_0,\ \dot\theta_0,\ b,\ \sigma,\ \nu\big)$.
+
+The priors are broad and only encode physics: uniform on $0 \lt \omega_0^2 \lt 50$,
+$0 \le \mu \lt 5$, $\lvert\theta_0\rvert \lt \pi$, $\lvert\dot\theta_0\rvert \lt 10\ \text{rad/s}$ and
+$\lvert b\rvert \lt 0.2\ \text{rad}$, and log-uniform for $\sigma$ and $\nu$. Damping cannot be
+negative, and the prior says so.
+
+### Sampling the posterior
+
+MCMC builds a random walk through parameter space whose long-run visiting frequency is the
+posterior. In its simplest form (Metropolis), a proposed move from $q$ to $q'$ is accepted
+with probability $\min\left(1, \tfrac{p(q' \mid \mathbf y)}{p(q \mid \mathbf y)}\right)$.
+Only a *ratio* of posteriors is needed, so the normalizing constant of Bayes' theorem never
+has to be computed.
+
+We use `emcee`, an *ensemble* sampler: 32 walkers move together, each proposing steps along
+the line towards another walker, so the ensemble adapts to correlated, elongated posteriors
+by itself. Each posterior takes 3000 steps, of which the first 1000 are discarded as
+burn-in (the walkers forgetting where they started). Every step evaluates the likelihood
+for all 32 walkers, so one posterior costs 96 000 simulations of the pendulum, about
+15 minutes. Two diagnostics show the chains are usable: about 45% of the proposals are
+accepted, and the autocorrelation time of 49 to 127 steps leaves 500 to 1000 effectively
+independent samples per posterior.
+
+<Figure video="/media/pendulum-lab/mcmc_walkers.mp4" width={100} alt="Thirty-two walkers move through the plane of omega0 squared and mu; the positions they visit fill a long tilted band that is cut off at zero damping">
+
+The first second of the reference recording: the walkers fill in the posterior of $(\omega_0^2, \mu)$
+
+</Figure>
+
+### Three cases
+
+We sample the posterior for the reference recording, for the small-swing recording that
+defeated SINDy in section 2.3, and for only the **first second** of the reference
+recording, half a swing:
+
+<Figure src="/media/pendulum-lab/bayes_posteriors.png" width={100} alt="Posterior samples and Jacobian ellipses for three datasets, and posterior histograms of the damping against the Gaussian approximation">
+
+Top: posterior samples of $(\omega_0^2, \mu)$ with the 95% Gaussian ellipse of section 2.4. Bottom: posterior of $\mu$ and the Gaussian approximation
+
+</Figure>
+
+| Data | $\omega_0^2$, 95%: posterior | Jacobian | $\mu$, 95%: posterior | Jacobian | correlation |
+|---|---|---|---|---|---|
+| Reference | $\pm 0.0017$ | $\pm 0.0018$ | $\pm 0.00023$ | $\pm 0.00025$ | $-0.40$ |
+| Small swing | $\pm 0.0047$ | $\pm 0.0050$ | $\pm 0.0015$ | $\pm 0.0016$ | $-0.02$ |
+| First second | $\left[9.26,\ 10.03\right]$ | $\left[8.98,\ 10.09\right]$ | $\left[0.007,\ 0.292\right]$ | $\left[{-0.098},\ 0.333\right]$ | $+0.95$ |
+
+**Plenty of data: the Gaussian is excellent.** On the reference recording the posterior is
+symmetric, and the Jacobian intervals are only 5 to 10% wider than the true ones. The error
+bars of section 2.4 are trustworthy, from one fit instead of 96 000 simulations.
+
+**Small swing: the parameters are fine.** SINDy could not discover the *structure* from this
+recording, but with the structure given, the *parameters* are almost as well determined as
+from the large swing ($\omega_0^2$ to $\pm 0.05$%). Discovering an equation and estimating its
+coefficients are different problems with different data requirements.
+
+**Half a swing: the Gaussian breaks down.** One second of data cannot tell a faster pendulum
+with more damping from a slower one with less: $\omega_0^2$ and $\mu$ become almost
+interchangeable (correlation $+0.95$), and the posterior is a long, narrow band. It is also
+**cut off at $\mu = 0$** by the prior and skewed towards larger values. The Gaussian
+approximation knows none of this: its interval is 45% wider for $\omega_0^2$, symmetric, and
+puts 14% of its probability on *negative* damping, which is physically impossible. The
+truth, $\mu = 0.2$, lies well inside the posterior.
+
+### The noise model, learned from the data
+
+The posterior also contains the noise parameters. On the reference recording the tail
+weight is $\nu = 2.7$ (95% interval $2.4$ to $3.0$): far from Gaussian. Without being told
+about outliers, the likelihood concluded from the residuals that large errors are common,
+and so it automatically gave them little influence, much like the robust loss of
+section 2.4.
+
+### What we learned
+
+- The posterior is the complete answer to "what do the data say about the parameters?";
+  MCMC samples it using only evaluations of likelihood times prior.
+- With plenty of data the posterior is close to Gaussian, and the Jacobian error bars of
+  output-error least squares are an excellent and far cheaper substitute.
+- With little data the posterior is correlated, skewed and bounded by physics, and only
+  sampling shows it.
+- A heavy-tailed likelihood with a learned tail weight handles outliers by itself.
+- Whether a *model structure* can be identified and whether its *parameters* can be are
+  separate questions.
+
+That completes chapter 2: from raw sensor data to parameters, discovered structure and
+honest uncertainty, all computed *after* the experiment from the whole recording.
+
+**Next:** chapter 3 · learning-based identification.

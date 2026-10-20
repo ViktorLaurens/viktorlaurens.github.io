@@ -1,0 +1,577 @@
+---
+project: pendulum-lab
+number: 6
+title: "The Furuta pendulum"
+summary: "The same questions for an underactuated system: equations of motion, a fixed-step simulator, experiment design, identification, model mismatch and estimation for control."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapters 1 to 5 asked every question of the
+[storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions) about one pendulum: the
+forward problem, its identification and its state. This chapter asks them again for a harder
+system, the one that chapters 7 and 8 will control. A motor turns a horizontal **arm**, and a
+**pendulum** swings freely at the arm's tip. There are two angles but only one motor: the
+pendulum can be moved only through the arm. Such a system is **underactuated**.
+
+The chapter builds what control needs: the equations (6.1), a simulator to test on (6.2),
+measurements and an experiment to identify from (6.3), the identified parameters (6.4 and
+6.5), and an online estimate of the state (6.6).
+
+The code is in `src/pendulum_lab/furuta.py`.
+
+## 6.1 The system and its equations
+
+### Two angles, one motor
+
+The arm, of mass $m_r$ and length $L_r$, turns in the horizontal plane about the motor's
+vertical axis; its angle is $\alpha$. The pendulum, of mass $m_p$ and length $L_p$, hangs from
+the tip of the arm and swings in the plane perpendicular to it. Its angle $\theta$ is measured
+from the downward vertical, as in chapter 1. Both are modelled as thin uniform rods, so the
+pendulum's centre of mass is at $l_p = \tfrac{1}{2} L_p$ from its joint. The values are close
+to those of a commercial desktop Furuta pendulum:
+
+| | arm | pendulum | motor |
+|---|---|---|---|
+| mass | $m_r = 0.095\ \text{kg}$ | $m_p = 0.024\ \text{kg}$ | |
+| length | $L_r = 0.085\ \text{m}$ | $L_p = 0.129\ \text{m}$ | |
+| viscous friction in the joint | $B_r = 10^{-4}\ \text{N m s}$ | $B_p = 10^{-5}\ \text{N m s}$ | |
+| electrical | | | $k_m = 0.042\ \text{N m/A}$, $R_m = 8.4\ \Omega$ |
+
+### Energy
+
+Lagrange's method needs only the kinetic and potential energy. A point at distance $s$ along
+the pendulum moves with the arm's tip, $L_r \dot\alpha$, and with its own swing. Its squared
+speed is
+
+$$
+\lvert \mathbf v \rvert^2 = L_r^2 \dot\alpha^2 + 2 L_r s \cos\theta \thinspace \dot\alpha \dot\theta + s^2 \dot\theta^2 + s^2 \sin^2\theta \thinspace \dot\alpha^2 .
+$$
+
+The last term is the point circling the motor axis at the horizontal distance $s \sin\theta$.
+Integrating over the pendulum's mass and adding the arm gives
+
+$$
+T = \tfrac{1}{2} \left(a + b \sin^2\theta\right) \dot\alpha^2 + c \cos\theta \thinspace \dot\alpha \dot\theta + \tfrac{1}{2} b \thinspace \dot\theta^2,
+\qquad
+V = d \left(1 - \cos\theta\right),
+$$
+
+with four **lumped parameters**:
+
+| | expression | meaning | value |
+|---|---|---|---|
+| $a$ | $\tfrac{1}{3} m_r L_r^2 + m_p L_r^2$ | inertia of the arm about the motor axis, with the pendulum's mass at its tip | $4.02 \cdot 10^{-4}\ \text{kg m}^2$ |
+| $b$ | $\tfrac{1}{3} m_p L_p^2$ | inertia of the pendulum about its joint | $1.33 \cdot 10^{-4}\ \text{kg m}^2$ |
+| $c$ | $m_p L_r l_p$ | coupling between arm and pendulum | $1.32 \cdot 10^{-4}\ \text{kg m}^2$ |
+| $d$ | $m_p g l_p$ | largest gravity torque on the pendulum | $1.52 \cdot 10^{-2}\ \text{N m}$ |
+
+### The motor
+
+The motor turns a voltage $V$ into a torque. Its current is $i = \tfrac{1}{R_m}(V - k_m \dot\alpha)$,
+where $k_m \dot\alpha$ is the back-EMF of the spinning motor, and its torque is $k_m i$:
+
+$$
+\tau = k V - k k_m \dot\alpha, \qquad k = \tfrac{k_m}{R_m} = 0.005\ \text{N m/V}.
+$$
+
+The second term acts like friction on the arm, and a strong one: $k k_m = 2.1 \cdot 10^{-4}\ \text{N m s}$,
+twice the mechanical friction $B_r$. It is lumped with $B_r$ into the arm's damping
+$\bar B_r = B_r + k k_m$.
+
+### The equations of motion
+
+Lagrange's equations for $\alpha$ and $\theta$, with the torque $\tau$ and the joint friction as
+generalized forces, give two coupled equations. In matrix form:
+
+$$
+\begin{bmatrix} a + b \sin^2\theta & c \cos\theta \cr c \cos\theta & b \end{bmatrix}
+\begin{bmatrix} \ddot\alpha \cr \ddot\theta \end{bmatrix} =
+\begin{bmatrix}
+k V - \bar B_r \dot\alpha - 2 b \sin\theta \cos\theta \thinspace \dot\alpha \dot\theta + c \sin\theta \thinspace \dot\theta^2 \cr
+-d \sin\theta - B_p \dot\theta + b \sin\theta \cos\theta \thinspace \dot\alpha^2
+\end{bmatrix}.
+$$
+
+The matrix on the left is the **mass matrix**. Its off-diagonal $c \cos\theta$ is the coupling:
+an arm that accelerates pushes the pendulum sideways, and a swinging pendulum pushes the arm
+back. The velocity terms on the right are the centrifugal and Coriolis forces of the rotating
+arm. The state is $\mathbf x = (\alpha, \theta, \dot\alpha, \dot\theta)$; the simulation
+solves the matrix equation for the accelerations at every step and integrates with the same
+8th-order Runge–Kutta method as chapter 1.
+
+Three checks, each a test in `tests/test_furuta.py`:
+
+- **A locked arm leaves the simple pendulum.** With $a \to \infty$ the arm cannot move, and the
+  second row becomes chapter 1's equation with $\omega_0^2 = \tfrac{d}{b} = 114\ \text{s}^{-2}$,
+  a period of $0.59\ \text{s}$, and $\mu = \tfrac{B_p}{b} = 0.075\ \text{s}^{-1}$.
+- **Without friction and torque, energy is conserved**, to within $10^{-8}$ of its value.
+- **So is the angular momentum about the motor axis**, $(a + b \sin^2\theta) \dot\alpha + c \cos\theta \thinspace \dot\theta$,
+  when the motor is disconnected and the arm turns freely: nothing then exerts a torque about
+  that axis.
+
+### Arm and pendulum push each other
+
+<Figure src="/media/pendulum-lab/furuta_coupling.png" width={100} alt="Left: the pendulum released from 90 degrees with a free arm; the arm swings between 0 and 34 degrees in step with the pendulum. Right: a short positive then negative voltage pulse moves the arm by about 40 degrees and leaves the pendulum swinging by 40 degrees, both decaying slowly">
+
+Left: the arm turns freely, so its angular momentum stays zero and it recoils whenever the
+pendulum swings. Right: the real motor, a $\pm 3\ \text{V}$ pulse of $0.3\ \text{s}$
+
+</Figure>
+
+On the left nothing drives the arm, yet it moves by $34^\circ$: to keep the angular momentum
+at zero, it turns opposite to the pendulum's sideways motion. The recoil also changes the
+pendulum. Near the bottom, with the arm free, the second row becomes
+$(b - \tfrac{c^2}{a}) \ddot\theta = -d \theta$: the pendulum swings with
+$\omega^2 = 169\ \text{s}^{-2}$ instead of 114, because part of its inertia is taken up by the
+arm. On the right, the pulse moves the arm and sets the pendulum swinging by $40^\circ$, after
+which the back-EMF slowly damps both.
+
+### Equilibria, and what underactuated means
+
+The pendulum is at rest hanging down, $\theta = 0$, or upright, $\theta = \pi$, and the arm can
+be at rest at any angle $\alpha$. Hanging is stable. Upright is unstable: linearized with a
+free arm, small deviations grow like $e^{\lambda t}$ with
+$\lambda = \sqrt{\tfrac{d}{b - c^2 \thinspace a^{-1}}}$, which is $13\ \text{s}^{-1}$. A tilt doubles in
+53 ms. Chapter 7's controller has to act faster than that.
+
+The motor appears only in the first row. It reaches the pendulum only through the coupling
+$c \cos\theta$, which vanishes when the pendulum is horizontal: at $\theta = \pm 90^\circ$ the
+motor cannot accelerate the pendulum at all. To swing it up, the controller must pump energy in
+over several swings, timing the arm's pushes to the pendulum's motion. That is what
+underactuated means in practice.
+
+### What we learned
+
+- Two coupled angles need a **mass matrix**: accelerating one body pushes the other.
+- The equations contain the physical parameters only in **seven combinations**: $a$, $b$, $c$, $d$,
+  $\bar B_r$, $B_p$ and $k$. Those, not masses and lengths, are what section 6.4 can identify.
+  Even they are fixed only up to a common factor: doubling all seven gives the same motion
+  (a test checks this), so one of them, the motor's $k$ from its data sheet, has to be known.
+- The motor reaches the pendulum only through the coupling, and not at all at $90^\circ$.
+  Control of this system is control through the arm.
+
+## 6.2 Simulating it
+
+Chapter 1 integrated the pendulum with an adaptive Runge–Kutta method at tolerance
+$10^{-10}$. That is the right tool for a recording: the integrator picks its own steps and
+the result is as exact as needed. A controller cannot work that way. It reads the sensors at
+fixed times, computes a voltage and **holds** it until the next reading. Chapters 7 and 8
+also need the simulator to be fast, because a learning controller will run it millions of
+times. So the simulator for control takes **fixed steps** with a held voltage.
+
+The plan was to cross-check our equations against MuJoCo, the physics engine chapter 8's
+reinforcement learning environment will use, which derives the equations itself from bodies
+and joints. The MuJoCo model is written, but MuJoCo's library is blocked by this machine's
+application control policy. The cross-check therefore moves to chapter 8, and this section
+tests our own fixed-step simulator against the adaptive reference instead.
+
+### Which integrator, which step
+
+Three fixed-step methods, each one step of `furuta.step`:
+
+- **Euler:** $\mathbf x \mathrel{+}= \mathbf f(\mathbf x) \thinspace \Delta t$. One evaluation
+  of the equations per step; the error per step is of order $\Delta t^2$, so halving the step
+  halves the error after a fixed time.
+- **Semi-implicit Euler:** first the velocities, then the angles with the *new* velocities.
+  Equally cheap, and for many mechanical systems far better behaved. It is MuJoCo's default,
+  with a step of 2 ms.
+- **RK4:** the classical 4th-order Runge–Kutta method, four evaluations per step. Halving the
+  step divides the error by 16; a test checks this.
+
+<Figure src="/media/pendulum-lab/furuta_integrators.png" width={100} alt="Left: largest angle error over 5 s against the time step; Euler and semi-implicit Euler stay above one degree even at 0.1 ms, RK4 falls steeply from 0.04 degrees at 10 ms to the reference's accuracy. Middle: the same against computing time. Right: energy of the frictionless system over 20 s at 10 ms steps; Euler gains a factor 7, semi-implicit Euler loses 90 percent, RK4 stays constant">
+
+Released from $120^\circ$ with the arm spinning at $2\ \text{rad/s}$, against the adaptive
+reference. The dotted line is the reference's own accuracy
+
+</Figure>
+
+| 5 s from $120^\circ$, spinning arm | largest angle error | computing time |
+|---|---|---|
+| Euler, 1 ms | $131^\circ$ | about $0.1\ \text{s}$ |
+| semi-implicit Euler, 2 ms | $43^\circ$ | about $0.05\ \text{s}$ |
+| semi-implicit Euler, 1 ms | $23^\circ$ | about $0.1\ \text{s}$ |
+| RK4, 10 ms | $0.04^\circ$ | about $0.02\ \text{s}$ |
+| RK4, 1 ms | $2.5 \cdot 10^{-7}$ degrees | about $0.15\ \text{s}$ |
+
+The Euler methods are not wrong by a little: after 5 s their arm is tens of degrees away from
+where the real one would be. They lose or gain energy every swing (right panel), so the
+swings drift out of phase, and the error grows until it is as large as the motion. RK4 at
+1 ms is exact for every practical purpose, at about 30 µs per step, fast enough for
+chapter 8.
+
+The step has to be small compared with the fastest time scale of the system. Here that is
+the upright instability of 6.1, which doubles a tilt in 53 ms. A 1 ms step resolves it with
+room to spare, and the simulator for control uses **RK4 with 1 ms steps**.
+
+A controller trained in a simulator learns the simulator, not the pendulum. A semi-implicit
+Euler simulator with 2 ms steps is a different pendulum with somewhat wrong energy, and a
+policy can learn to exploit that. This is one reason chapter 8 cross-checks the simulator
+before training on it.
+
+### Pumping it up
+
+<Figure video="/media/pendulum-lab/furuta_resonance.mp4" width={100} alt="The Furuta pendulum in an oblique 3D view, driven by a sine voltage; the arm sways back and forth and the pendulum swing grows to over 130 degrees, then shrinks again, while plots on the right trace the voltage and the pendulum angle">
+
+$V = 2 \sin(10\ t)$ volt from rest, shown at half speed
+
+</Figure>
+
+The motor cannot lift the pendulum directly (6.1), but it can pump energy in. A sine voltage
+near the pendulum's own frequency swings the arm back and forth, and the pendulum's swing grows
+with every period, to $134^\circ$ after 4 s. Then it shrinks again. A large swing is slower
+than a small one (chapter 1), so the pendulum drifts out of step with the fixed drive at $10\ \text{rad/s}$,
+and the drive starts taking energy out. To bring it all the way up, the push has to follow the
+pendulum's motion instead of a clock: feedback, the subject of chapter 7.
+
+### What we learned
+
+- A controller needs a simulator with **fixed steps and a held input**; the adaptive integrator
+  stays the reference for checking it.
+- Integrators differ by orders of magnitude, not percent. RK4 with 1 ms steps matches the
+  reference to $10^{-6}$ degrees; Euler methods with the same step miss by tens of degrees after
+  5 s.
+- Open-loop forcing can pump the pendulum up, but not reliably to the top: that needs feedback.
+
+## 6.3 Measurements and experiment design
+
+The code is in `src/pendulum_lab/furuta_experiment.py`.
+
+### Two encoders and a known input
+
+A desktop Furuta pendulum measures both angles with optical **encoders**: a disc with 2048
+slots per revolution, counted as it turns. Read at $500\ \text{Hz}$, each angle comes in whole counts
+of $\tfrac{360^\circ}{2048} = 0.18^\circ$:
+
+$$
+y_{\alpha,k} = Q(\alpha_k), \qquad y_{\theta,k} = Q(\theta_k),
+$$
+
+where $Q$ rounds to the nearest count. That rounding is the only measurement error: no
+Gaussian noise, no outliers, no offset, because both encoders are zeroed at power-up with the
+pendulum hanging at rest. Its standard deviation is one count over $\sqrt{12}$, $0.05^\circ$,
+ten times smaller than the sensor of chapter 2. The **voltage** is chosen by the
+experimenter, so it is known exactly, and the motor gain $k$ comes from the motor's data
+sheet.
+
+What the encoders do not give is the velocities. Differencing two counts 4 ms apart turns
+one count into a jump of $44^\circ$ per second:
+
+<Figure src="/media/pendulum-lab/furuta_encoder.png" width={100} alt="Left: a tenth of a second of the pendulum angle near a turning point; the encoder follows the true curve in steps of 0.18 degrees. Right: central differences of the encoder jump around the true angular velocity in steps of 44 degrees per second">
+
+A tenth of a second of the excitation recording, around a turning point of the pendulum
+
+</Figure>
+
+Over the whole recording, the differenced velocities are off by $18^\circ$ per second RMS.
+That is enough for a rough look, too much for a controller. Section 6.6 estimates the
+velocities properly.
+
+### What the input has to do
+
+In chapter 2 the experiment was simple: release the pendulum and record. Here we choose
+the voltage, and the choice decides what the recording can reveal. One way to compare
+candidate inputs before running any of them is the **Cramér–Rao bound**. Linearize the
+simulated measurements around the nominal parameters, as the Jacobian of 2.4 did, and
+weigh them by the measurement noise. The result is the Fisher information matrix. Its
+inverse is the smallest covariance any unbiased estimator can reach. For four 10 s
+candidates, with the six unknown parameters $a$, $b$, $c$, $d$, $\bar B_r$, $B_p$ and the
+gain $k$ known:
+
+<Figure src="/media/pendulum-lab/furuta_designs.png" width={100} alt="Four columns, one per candidate input: no input with the pendulum released at 60 degrees, two short pulses, a chirp, and a multisine. Rows show the voltage, the arm angle and the pendulum angle over 10 s. Only the multisine swings the pendulum beyond 90 degrees, up to about 150">
+
+Four candidate experiments, simulated with the nominal model. The title gives the largest
+relative standard deviation of the six parameters that the experiment can deliver
+
+</Figure>
+
+| Cramér–Rao bound, relative standard deviation | $a$ | $b$ | $c$ | $d$ | $\bar B_r$ | $B_p$ | largest pendulum angle |
+|---|---|---|---|---|---|---|---|
+| no input, released at $60^\circ$ | | | | | | | $60^\circ$ |
+| two pulses of 3 V | 0.009 % | 0.020 % | 0.015 % | 0.017 % | 0.008 % | 0.043 % | $45^\circ$ |
+| chirp, $1$ to $5\ \text{Hz}$, 2 V | 0.008 % | 0.012 % | 0.010 % | 0.010 % | 0.011 % | 0.033 % | $79^\circ$ |
+| multisine, $1$ to $5\ \text{Hz}$, 4 V | 0.003 % | 0.006 % | 0.006 % | 0.005 % | 0.002 % | 0.005 % | $152^\circ$ |
+
+Three things stand out:
+
+- **Without an input, nothing can be identified.** The empty row is not a small number but a
+  singular matrix. With $V = 0$, both rows of the equations of motion are linear in the six
+  parameters without any fixed term, so doubling all of them changes nothing (6.1). Only
+  ratios such as $\tfrac{d}{b}$ are determined. The known motor gain sets the scale, and only
+  through an input.
+- **Once anything moves, the bound is tiny.** Encoders this precise make every reasonable
+  input informative: a few hundredths of a percent. The bound assumes the model is exact,
+  though, and that is the weak point: a bias from a wrong model is not in it. The real
+  errors in 6.4 will be much larger than these numbers, and section 6.5 shows why.
+- **So the input is chosen for range.** The data should cover the states the model will be
+  used in, the lesson of chapters 3 and 4. A controller that swings the pendulum up needs a
+  model that is right at large angles. The multisine, sines at every $0.25\ \text{Hz}$ from $1$ to $5\ \text{Hz}$
+  with phases chosen to keep the peak low, swings the pendulum up to $152^\circ$ while the
+  arm stays between $0$ and $85^\circ$. It is also the most informative of the four.
+
+A note on sensitivity: near the upright position, small differences grow quickly (6.1). A
+change in any term of the equations by 1 % of the motor's torque moves the simulated
+pendulum by tens of degrees after 10 s. Comparing a model with a recording over a 10 s
+simulation is therefore a harsh test. Section 6.4 compares predictions over shorter
+horizons, which is also what a controller needs.
+
+### The frozen recordings
+
+Two recordings are frozen in `data/`, both 10 s at $500\ \text{Hz}$ from rest:
+`furuta_excitation` with the multisine, for identification, and `furuta_validation` with the
+chirp, held back to test the identified model on an input it has not seen. As in chapter 4,
+the simulated pendulum that produced them is not quite the model of 6.1. What it adds is
+recorded in its truth file and found in section 6.5.
+
+### What we learned
+
+- The encoders measure angles almost exactly, but not velocities: differencing turns one
+  count into $44^\circ$ per second.
+- An experiment has to excite what it should identify. Without an input the scale of the
+  parameters is lost entirely; with one, the Cramér–Rao bound shows that precision is not
+  the problem here, accuracy will be.
+- The input is chosen to cover the range the model will be used in.
+
+## 6.4 Identification
+
+The code is in `src/pendulum_lab/furuta_id.py`; the
+numbers come from `scripts/evaluate_furuta.py`. Both methods
+are the ones chapter 2 found best, carried over to two angles.
+
+### Regression on the equations of motion
+
+Written out, both rows of the equations of motion are **linear in the six unknowns**. With
+the known gain $k$ on the right-hand side:
+
+$$
+a \ddot\alpha + b \left(\sin^2\theta \thinspace \ddot\alpha + 2 \sin\theta \cos\theta \thinspace \dot\alpha \dot\theta\right) + c \left(\cos\theta \thinspace \ddot\theta - \sin\theta \thinspace \dot\theta^2\right) + \bar B_r \dot\alpha = k V,
+$$
+
+$$
+b \left(\ddot\theta - \sin\theta \cos\theta \thinspace \dot\alpha^2\right) + c \cos\theta \thinspace \ddot\alpha + d \sin\theta + B_p \dot\theta = 0.
+$$
+
+Every sample gives two equations; 5000 samples give 10 000 equations for six unknowns,
+solved by least squares, exactly as in 2.2. The velocities and accelerations come from
+Savitzky–Golay filters on the encoders. The window matters even more than in 2.2, because
+the rounding of the encoders is amplified twice. With 20 ms most parameters are 30 to 40 %
+too small; with 80 ms the filter flattens the fast swings and $d$ is 15 % off; 40 ms is the
+best of the three.
+
+### Output error on short segments
+
+Output error (2.4) simulates the model and fits the simulated angles to the measured ones.
+Over the whole 10 s recording that is hopeless: as 6.3 showed, near the upright position
+small errors grow to tens of degrees, and the fit would chase that growth instead of the
+parameters. So the recording is cut into **segments of 0.5 s**, each simulated from its own
+fitted initial state. This is the multiple shooting of 3.4 without the continuity constraint:
+20 segments, $6 + 20 \times 4 = 86$ unknowns. All segments are simulated together as one
+vectorized batch, and the fit, started from the regression's answer, takes about a second.
+
+### Results
+
+<Figure src="/media/pendulum-lab/furuta_identification.png" width={100} alt="Left: errors of the six identified parameters against the truth; a, b, c and d are within 5 percent, the arm damping is 85 to 115 percent too large, the pendulum damping 10 percent too large for regression and 52 percent too small for output error, far outside output error's own error bars. Middle and right: RMS prediction error on the validation recording against the prediction time, from 0.01 degrees at 10 ms to several degrees after 2 s; both fits predict better than the true parameters without friction">
+
+Left: the identified parameters. Middle and right: predicting the validation recording,
+simulated from the true state every 0.1 s, against the truth
+
+</Figure>
+
+| | $a$ | $b$ | $c$ | $d$ | $\bar B_r$ | $B_p$ | predicting $\theta$ for 0.1 s | for 0.5 s | for 2 s |
+|---|---|---|---|---|---|---|---|---|---|
+| regression, 40 ms window | +0.7 % | -4.3 % | -1.0 % | -5.1 % | +85 % | +10 % | $0.44^\circ$ | $1.9^\circ$ | $7.2^\circ$ |
+| output error, segments of 0.5 s | +1.2 % | +1.0 % | +1.2 % | +1.0 % | +116 % | -52 % | $0.33^\circ$ | $1.1^\circ$ | $4.1^\circ$ |
+| its own standard errors | 0.07 % | 0.08 % | 0.08 % | 0.08 % | 0.6 % | 1.7 % | | | |
+| true parameters, without friction | | | | | | | $0.60^\circ$ | $2.5^\circ$ | $10.5^\circ$ |
+
+The inertias and the gravity term come out within a few percent, and output error finds
+$\tfrac{d}{b}$, the pendulum's own frequency, almost exactly. Three things are wrong, and
+each one is a clue:
+
+- **The arm's damping is twice too large**, by both methods, while output error claims to
+  know it to 0.6 %. As in chapter 4, the error bars are computed *given the model*, and they
+  are confidently wrong.
+- **The best fit predicts better than the true parameters.** Validated on the chirp, which
+  neither fit has seen, both identified models predict better than the true lumped
+  parameters with the friction left out. When the model is incomplete, the fit
+  compensates: the extra arm damping stands in for whatever the model misses. The
+  parameters are then no longer physical, but the predictions are as good as this model
+  can make them.
+- **The residuals are too large.** The angles of output error's segments miss the measured
+  ones by $0.27^\circ$ RMS, five times the $0.05^\circ$ rounding of the encoders, and the
+  miss grows with the segment length: $0.12^\circ$ for 0.25 s, $0.75^\circ$ for 1 s. An
+  exact model would fit down to the rounding.
+
+All three point the same way: the model is missing something in the arm. Section 6.5 looks
+for it.
+
+### What we learned
+
+- The Furuta equations are linear in their parameters, so regression works as for the
+  simple pendulum, but it depends even more on the filter window.
+- Output error on short segments avoids the growth of errors near the upright position
+  and fits in about a second.
+- A model can predict well with wrong parameters. Residuals larger than the measurement
+  error, and parameters that change with the segment length, are the signs that the model
+  is incomplete.
+
+## 6.5 What the model misses
+
+Section 6.4 left three clues, all pointing at the arm. Section 3.5 already showed how to
+follow them: before changing the model, look at what it fails to explain. The regression
+gives that directly. Its residual in the arm equation is the torque that the model cannot
+account for, sample by sample. Sorted by the arm's speed:
+
+<Figure src="/media/pendulum-lab/furuta_friction.png" width={100} alt="Left: median residual of the arm equation against the arm speed; with viscous damping only it jumps from about plus 0.7 to minus 0.7 millinewton metres at zero speed and then rises with the speed, a sawtooth; with a dry friction term it scatters around zero. Right: prediction error of the pendulum angle on the validation recording against the prediction time; with viscous damping only it reaches 1 degree after half a second, with dry friction it stays below a hundredth of a degree for 2 s">
+
+Left: what the arm equation leaves unexplained, as a function of the arm's speed. Right: the
+effect of one more term on the predictions
+
+</Figure>
+
+With viscous damping only, the residual has a shape that does not fit noise: it **jumps** by
+about 1.4 mN·m where the arm's speed changes sign, and in between it slopes the other way.
+That is the signature of **dry friction**, a torque of constant size $F$ that always
+opposes the motion, $-F \thinspace \mathrm{sign}(\dot\alpha)$. The model fitted the best
+straight line through it, which is the inflated viscous damping of 6.4. In the
+pendulum equation, the residual shows no such pattern.
+
+### One more term
+
+Dry friction adds a single unknown $F$ to the arm equation. The sign function is smoothed
+to $\tanh(\tfrac{\dot\alpha}{0.02})$, so that the equations stay smooth enough for the
+integrators. The new term is again linear in its parameter, so both methods carry over
+unchanged:
+
+| | $a$ to $d$ | $\bar B_r$ | $B_p$ | $F$ | RMS residual | predicting $\theta$ for 0.5 s | for 2 s |
+|---|---|---|---|---|---|---|---|
+| output error, viscous damping only (6.4) | 1.0 to 1.2 % | +116 % | -52 % | | $0.27^\circ$ | $1.1^\circ$ | $4.1^\circ$ |
+| regression, plus dry friction | 0.4 to 6.3 % | -8.9 % | +6.9 % | -1.5 % | | $0.94^\circ$ | $3.6^\circ$ |
+| output error, plus dry friction | below 0.01 % | -0.04 % | -0.16 % | +0.03 % | $0.050^\circ$ | $0.0014^\circ$ | $0.005^\circ$ |
+
+With the friction term, output error finds $F = 1.0003 \pm 0.0017$ mN·m, about 2 % of the
+motor's maximum torque. The other parameters land within 0.2 % of the truth, inside their
+error bars. The residual falls to $0.050^\circ$, the rounding of the encoders, which is all
+that an exact model leaves. The parameters no longer depend on the segment length either:
+with segments from 0.25 to 2 s they agree to 0.6 %. The predictions on the validation chirp
+improve by a factor of 800. Regression finds the friction too, within 1.5 %, but its
+derivatives still bias the other parameters by a few percent (6.4).
+
+### Physics or a network?
+
+Chapter 4 found that when the physics is incomplete, a learned model such as the Neural
+ODE can beat it. Here the residual plot made a learned correction unnecessary. The missing
+torque depends on one variable and has a recognizable shape, so one physical term with one
+parameter captures it, and it extrapolates to speeds the experiment never reached. A
+network in place of the term (3.5) would have to learn a step from the 3 % of samples where
+the arm is nearly at rest. The residual plot is cheap; it is worth making before choosing.
+
+To be honest about how easy this was: the friction in the simulated pendulum has exactly the
+smoothed form that was then fitted. Real dry friction is messier. It sticks harder at rest
+than it slides (stiction), it can depend on the speed (the Stribeck effect) and on the
+position (gear teeth, magnetic cogging). The method stays the same: look at the residuals,
+add the term they point to, check that the residuals fall to the measurement noise.
+
+### What we learned
+
+- Residuals larger than the noise, sorted by the right variable, show what the model misses
+  and often its form.
+- Dry friction in the arm, 2 % of the motor's torque, was enough to double the identified
+  damping and to multiply the prediction error by hundreds.
+- With the missing term, output error recovers every parameter to within 0.2 %, and the
+  residuals fall to the encoders' rounding: the model is complete.
+
+## 6.6 State estimation for control
+
+The code is in `src/pendulum_lab/furuta_estimation.py`.
+
+A controller for the Furuta pendulum needs the full state $(\alpha, \theta, \dot\alpha, \dot\theta)$
+at every sample, and online: only past measurements count. The encoders give the angles to
+$0.05^\circ$ but no velocities (6.3). This is the question of chapter 5 again, with two
+measured angles instead of one, and with a known input.
+
+### Two ways to get velocities
+
+The usual approach on a motor drive is to **difference** the encoder and smooth the result
+with a low-pass filter. A backward difference $\tfrac{y_k - y_{k-1}}{h}$ turns one count into
+$88^\circ$ per second. A low-pass with cutoff $\omega_c$ averages that out but lags behind by
+about $\tfrac{1}{\omega_c}$. Neither uses anything about the pendulum.
+
+The **extended Kalman filter** of 5.3 uses the model instead. It predicts each sample with
+one RK4 step of the identified equations under the voltage that was applied, linearizes that
+step, and corrects with both encoders. The measurement noise is the encoders' rounding.
+The process noise is a white-noise acceleration of density $q$ on each joint, standing for
+whatever the model gets wrong (5.5).
+
+### Results on the validation recording
+
+<Figure src="/media/pendulum-lab/furuta_estimation.png" width={100} alt="Left: half a second of the error in the pendulum's angular velocity; backward differences jump by up to 80 degrees per second, the low-pass filtered differences by about 20 to 40, the EKF with the model without friction by a few, the EKF with the full model is flat at zero. Middle: innovation log-likelihood against the process noise q; for the model without friction it peaks at q = 0.1, for the model with friction it keeps rising towards small q. Right: the RMS velocity error against q, with the same minima, far below the differencing methods">
+
+Velocity estimates on the validation chirp. The stars mark the $q$ that the innovation
+likelihood picks, without the truth
+
+</Figure>
+
+| validation recording, RMS error | $\dot\alpha$ | $\dot\theta$ |
+|---|---|---|
+| backward differences | $36^\circ$ per s | $36^\circ$ per s |
+| differences, low-pass at $50\ \text{rad/s}$ | $29^\circ$ per s | $61^\circ$ per s |
+| differences, low-pass at $200\ \text{rad/s}$ | $12^\circ$ per s | $19^\circ$ per s |
+| EKF, model without friction (6.4), $q = 0.1$ | $2.1^\circ$ per s | $2.1^\circ$ per s |
+| EKF, model with friction (6.5), $q = 10^{-5}$ | $0.04^\circ$ per s | $0.04^\circ$ per s |
+
+The model makes the difference. Even the model without friction, which mispredicts the
+validation recording by $1^\circ$ after half a second (6.4), estimates the velocities six to
+nine times better than the best low-pass: over one sample of 2 ms its error is tiny, and the
+encoders correct it at every sample.
+
+The process noise is chosen as in 5.5, from the **innovation likelihood**, with no access to
+the truth. For the model without friction it peaks at $q = 0.1$, which is also the $q$ with
+the smallest true error. For the model with friction it keeps rising as $q$ shrinks, down to
+the smallest value tried: the model is exact, so the filter does best by trusting it almost
+completely. That is an artifact of simulated data. A filter this confident would recover
+slowly from anything the model does not know, such as a finger tapping the pendulum. On a
+real rig the model is never exact, and the likelihood stops at a finite $q$, as it did for
+the model without friction. The filter's own uncertainty is consistent with its errors: the
+mean NEES (5.5) is about 2 for four states, slightly cautious, because the rounding error is
+uniform rather than Gaussian.
+
+One sample of the filter takes about 0.8 ms in Python, within the 2 ms between samples
+at $500\ \text{Hz}$; compiled, it would take a few microseconds.
+
+### What we learned
+
+- Velocities by differencing an encoder are either noisy or late. A model-based filter is
+  neither: even an imperfect model gives errors several times smaller.
+- The innovation likelihood picks the process noise from the measurements alone, for two
+  angles as for one.
+- With an exact model the filter wants to trust it completely. Real systems never allow
+  that; some process noise is the price of robustness.
+
+## Chapter summary
+
+The chapter asked the questions of chapters 1 to 5 again for a system with two coupled
+angles and one motor, and built the pieces that control will need:
+
+| | built | result |
+|---|---|---|
+| 6.1 | the equations of motion | a $2 \times 2$ mass matrix, seven lumped parameters, the upright doubling a tilt in 53 ms |
+| 6.2 | a simulator for control | RK4 with 1 ms steps and a held voltage: within $10^{-6}$ degrees of the reference |
+| 6.3 | an experiment | encoders at $500\ \text{Hz}$ and a multisine that swings the pendulum to $152^\circ$ |
+| 6.4 | identification | inertias within a few percent, but the arm's damping twice too large |
+| 6.5 | the missing term | dry friction found from the residuals; every parameter within 0.2 % |
+| 6.6 | the state | an EKF that estimates the velocities to within $2^\circ$ per second, or better |
+
+Three lessons carry beyond the pendulum:
+
+- **The experiment decides what can be known.** Without an input, the parameters' scale is
+  lost. With one, precision is easy, and the input should be chosen for the range the model
+  will be used in.
+- **Residuals tell what a model misses.** A fit can predict well with wrong parameters and
+  confident error bars. Residuals above the measurement noise, sorted by the right
+  variable, showed the missing friction and its form.
+- **Models pay off online too.** The identified model turned noisy encoder differences into
+  clean velocity estimates, the input a controller needs.
+
+The cross-check of the simulator against MuJoCo, planned for 6.2, moves to chapter 8.
+
+**Next:** chapter 7 · classical control.

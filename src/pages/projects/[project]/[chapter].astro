@@ -1,0 +1,113 @@
+---
+import { getCollection, getEntry, render } from 'astro:content';
+import Base from '../../../layouts/Base.astro';
+
+export async function getStaticPaths() {
+  const chapters = await getCollection('chapters');
+  return chapters.map((c) => {
+    const [project, chapter] = c.id.split('/');
+    return { params: { project, chapter }, props: { entry: c } };
+  });
+}
+
+const { entry } = Astro.props;
+const { project: projectId } = Astro.params;
+const project = await getEntry('projects', projectId!);
+if (!project) throw new Error(`Unknown project ${projectId}`);
+
+const siblings = (await getCollection('chapters', (c) => c.data.project === projectId))
+  .sort((a, b) => a.data.number - b.data.number);
+const index = siblings.findIndex((c) => c.id === entry.id);
+const prev = siblings[index - 1];
+const next = siblings[index + 1];
+const slugOf = (id: string) => id.split('/').pop();
+const href = (c: typeof entry) => `/projects/${projectId}/${slugOf(c.id)}/`;
+
+const { Content, headings } = await render(entry);
+const toc = headings.filter((h) => h.depth === 2);
+const { number, title, summary } = entry.data;
+const num = String(number).padStart(2, '0');
+---
+<Base title={`${num} · ${title} · ${project.data.title}`} description={summary}>
+  <article class="chapter-page container">
+    <header class="chapter-head">
+      <p class="eyebrow eyebrow--accent"><a href={`/projects/${projectId}/`}>{project.data.title}</a> · Chapter {number} of {siblings.length}</p>
+      <h1><span class="mono chapter-head__num">{num}</span> {title}</h1>
+      <p class="lede">{summary}</p>
+    </header>
+
+    <div class="chapter-body">
+      <aside class="side">
+        <nav class="toc" aria-label="In this chapter">
+          <p class="eyebrow">In this chapter</p>
+          <ol>
+            {toc.map((h) => <li><a href={`#${h.slug}`}>{h.text}</a></li>)}
+          </ol>
+        </nav>
+        <nav class="chapters-nav" aria-label="Chapters">
+          <p class="eyebrow">Chapters</p>
+          <ol>
+            {siblings.map((c) => (
+              <li>
+                <a href={href(c)} aria-current={c.id === entry.id ? 'page' : undefined}>
+                  <span class="mono">{String(c.data.number).padStart(2, '0')}</span> {c.data.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      </aside>
+
+      <div class="prose chapter-prose">
+        <Content />
+
+        <nav class="pager" aria-label="Previous and next chapter">
+          {prev ? (
+            <a class="pager__link" href={href(prev)} rel="prev">
+              <span class="eyebrow">← Previous</span>
+              <span class="pager__title">{String(prev.data.number).padStart(2, '0')} · {prev.data.title}</span>
+            </a>
+          ) : <span />}
+          {next ? (
+            <a class="pager__link pager__link--next" href={href(next)} rel="next">
+              <span class="eyebrow">Next →</span>
+              <span class="pager__title">{String(next.data.number).padStart(2, '0')} · {next.data.title}</span>
+            </a>
+          ) : (
+            <a class="pager__link pager__link--next" href={`/projects/${projectId}/`}>
+              <span class="eyebrow">Back to</span>
+              <span class="pager__title">{project.data.title}</span>
+            </a>
+          )}
+        </nav>
+      </div>
+    </div>
+  </article>
+</Base>
+
+<style>
+  .chapter-page { padding-block: var(--space-12); }
+  .chapter-head { display: grid; gap: var(--space-4); max-width: 60rem; margin-bottom: var(--space-12); }
+  .chapter-head .eyebrow a { text-decoration: none; }
+  .chapter-head__num { color: var(--fg-faint); font-weight: 400; margin-right: .15em; }
+  .chapter-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-12); align-items: start; }
+  .chapter-body > * { min-width: 0; }
+  @media (min-width: 1100px) { .chapter-body { grid-template-columns: 250px minmax(0, 1fr); } }
+  .side { position: sticky; top: 88px; display: grid; gap: var(--space-8); max-height: calc(100dvh - 100px); overflow-y: auto; font-size: .88rem; scrollbar-width: thin; }
+  .side ol { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: .35em; border-left: 1px solid var(--line); }
+  .side a { display: block; padding: .15em 0 .15em .9em; color: var(--fg-muted); text-decoration: none; border-left: 1.5px solid transparent; margin-left: -1px; line-height: 1.4; }
+  .side a:hover { color: var(--fg); border-left-color: var(--accent); }
+  .side a[aria-current="page"] { color: var(--fg); border-left-color: var(--accent); }
+  .side .mono { color: var(--fg-faint); font-size: .8em; margin-right: .3em; }
+  @media (max-width: 1099px) { .side { position: static; max-height: none; } .toc { display: none; } .side ol { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); border: 0; } .side a { border: 1px solid var(--line); border-radius: var(--radius); padding: .5em .8em; margin: 0; } }
+  .chapter-prose { max-width: 72ch; }
+  .chapter-prose :global(h2) { scroll-margin-top: 90px; }
+  .chapter-prose :global(h3) { scroll-margin-top: 90px; }
+  .pager { display: grid; gap: var(--space-4); grid-template-columns: 1fr 1fr; margin-top: var(--space-16); padding-top: var(--space-8); border-top: 1px solid var(--line); }
+  .pager__link { display: grid; gap: .3em; text-decoration: none; color: inherit; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-lg); transition: border-color .2s var(--ease); }
+  .pager__link:hover { border-color: var(--accent); color: inherit; }
+  .pager__link:hover .pager__title { color: var(--accent); }
+  .pager__link--next { text-align: right; }
+  .pager__title { font-weight: 600; }
+  @media (max-width: 540px) { .pager { grid-template-columns: 1fr; } .pager__link--next { text-align: left; } }
+</style>

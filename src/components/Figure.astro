@@ -1,0 +1,29 @@
+---
+/**
+ * A figure with an image or a looping video and a caption (default slot).
+ * `width` is a percentage of the text column, as in the source report.
+ */
+interface Props {
+  src?: string;
+  video?: string;
+  alt: string;
+  width?: number;
+}
+const { src, video, alt, width = 100 } = Astro.props;
+---
+<figure class="fig" style={`--w: ${width}%`}>
+  {video ? (
+    <video class="fig__media" src={video} autoplay loop muted playsinline preload="metadata" aria-label={alt}></video>
+  ) : (
+    <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" />
+  )}
+  <figcaption><slot /></figcaption>
+</figure>
+
+<style>
+  .fig { margin: 2em 0; display: grid; justify-items: center; gap: .6em; }
+  .fig__media { width: var(--w); max-width: 100%; border-radius: var(--radius); background: #000; }
+  figcaption { font-size: .88rem; color: var(--fg-muted); text-align: center; max-width: 60ch; line-height: 1.5; }
+  figcaption :global(p) { margin: 0; }
+  figcaption :global(.katex) { font-size: 1em; }
+</style>

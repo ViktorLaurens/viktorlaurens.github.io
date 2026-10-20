@@ -1,0 +1,642 @@
+---
+project: pendulum-lab
+number: 3
+title: "Learning-based identification"
+summary: "The same question with flexible model classes: a plain network, a physics-informed neural network, a Neural ODE, and physics with a learned residual."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 2 asked what a recording of the angle says about the pendulum, and answered with a
+model whose structure came from physics: an equation with three unknown numbers. This chapter
+asks the same question with **more flexible models**, up to neural networks that know nothing
+about pendulums. It is still identification, offline, from the whole recording (see the
+[storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)); only the model class changes.
+
+The code is in `src/pendulum_lab/learning.py`; the numbers come
+from `scripts/evaluate_learning.py`. The networks are
+written in PyTorch and trained on the CPU.
+
+## 3.1 From parameters to functions
+
+### A ladder of model classes
+
+Every model in this report describes the same thing, how the state of the pendulum evolves,
+but they differ in how much of that description is fixed in advance and how much is learned
+from the data:
+
+| model | what is learned | unknowns | section |
+|---|---|---|---|
+| the pendulum equation | $\omega_0^2$, $\mu$, $b$ | 3 | 2.2, 2.4, 2.5 |
+| a library of candidate terms | which terms, and their coefficients | 12, most of them zero | 2.3 |
+| the pendulum equation plus a network | a correction to the physics | 3 plus a small network | 3.5 |
+| a network for the dynamics | the acceleration as a function of the state | 8600 weights | 3.4 |
+| a network for the trajectory | the angle as a function of time | 50 000 weights | 3.2, 3.3 |
+
+Going down the ladder, the model assumes less and can represent more, but it also has to
+learn more from the same 1000 samples. The bottom row has fifty times more unknowns than
+there are measurements. What keeps such a model from fitting the noise exactly is not the
+data but the way it is trained, and that is worth understanding before trusting it.
+
+### Training a network
+
+A neural network is a function built from simple pieces. Here every hidden layer computes
+$\mathbf h_{\ell+1} = \tanh\left(W_\ell \mathbf h_\ell + \mathbf c_\ell\right)$, and a final linear layer
+produces the output. The weights $W_\ell$ and $\mathbf c_\ell$ are the unknowns. *Training*
+is the same least-squares fit as in section 2.4, the robust loss included, but with a different
+optimizer:
+
+- **No closed form, many minima.** The loss is not convex in the weights. Training starts from
+  random weights and follows the gradient downhill, so the result depends on the starting
+  point: every network here is trained with a fixed random seed, and the spread over seeds is
+  reported.
+- **Gradients by automatic differentiation.** PyTorch records every operation of the forward
+  computation and applies the chain rule backwards through it. That gives the exact gradient
+  of the loss with respect to all weights, at the cost of about one extra forward pass.
+- **Adam.** The optimizer takes small steps along a running average of the gradients, each
+  weight scaled by its own running gradient size. The step size is lowered gradually to zero
+  over the training run (a cosine schedule).
+
+### The test: forecast what was not seen
+
+Fitting the data is not enough; a flexible model fits almost anything. The test in this
+chapter is therefore **prediction**: every method sees only the **first 10 s** of a recording
+(1000 samples) and is then asked about the **last 10 s**, which it has never seen. Inside the
+training window a model *interpolates*, after it it must *extrapolate*.
+
+The physics model of chapter 2 sets the bar. Output error (2.4), fitted on the training window
+only, finds $\omega_0^2 = 9.8099 \pm 0.0016$ and $\mu = 0.2002 \pm 0.0002$ on the reference
+recording, and its simulation forecasts the unseen 10 s with an RMS angle error of
+$0.040^\circ$ and a velocity error of $0.0021\ \text{rad/s}$:
+
+<Figure src="/media/pendulum-lab/learning_split.png" width={100} alt="The reference recording split in a shaded training window and a test window; the simulation of the output-error fit lies on the true angle in both, with an error below a tenth of a degree throughout">
+
+Reference recording. The output-error fit of section 2.4 sees only the shaded first 10 s
+
+</Figure>
+
+Three numbers, the right equation, and the forecast is as good as the fit. Every learned model
+in this chapter is held against this.
+
+## 3.2 A network for the trajectory
+
+The most direct use of a network is to fit the measured curve itself: a function
+$\hat\theta(t)$ from time to angle, with no physics at all. The network has four hidden layers
+of 128 neurons (50 000 weights), its input is time scaled to $[{-1}, 1]$ over the training
+window, and it is trained for 6000 Adam steps on the robust loss of section 2.4, which takes
+about 20 s on a laptop CPU.
+
+Two things come for free. The derivative $\tfrac{d\hat\theta}{dt}$ is available exactly, by the
+same automatic differentiation that computes the gradients: the network is its own velocity
+estimate. And the robust loss lets the outliers barely pull on the fit. One thing is
+impossible: the network fits the measurement $y = \theta + b$, and without a model of the
+dynamics nothing distinguishes the offset $b$ from the angle. The figures subtract the true
+offset only for display.
+
+### What the network learns first
+
+<Figure src="/media/pendulum-lab/network_training.png" width={100} alt="Four snapshots of the network's curve during training over the measurements of the first ten seconds: after 100 steps a nearly flat line, after 400 steps the first two and a half swings, after 1500 steps all swings roughly, after 6000 steps all swings closely; below the training loss on logarithmic axes, flat for 100 steps and then falling by two orders of magnitude">
+
+Reference recording, training window. Bottom: the training loss, with the four snapshots marked
+
+</Figure>
+
+Training proceeds in stages. For the first hundred steps the network finds only the average
+level. Then it picks up the oscillation, starting with the large early swings, which dominate
+the loss, and working its way to the smaller later ones. The fine details come last. This
+preference for simple, smooth functions is typical of networks trained by gradient descent,
+and it is what keeps 50 000 weights from fitting 1000 noisy samples exactly: training stops
+long before the network gets to the noise.
+
+### Inside and outside the training window
+
+<Figure video="/media/pendulum-lab/network_pendulum.mp4" width={100} alt="The true pendulum and a pendulum driven by the network swing together for ten seconds; when the training data ends, the network's pendulum drifts to about minus fifty degrees and stops there, while the true one keeps swinging">
+
+Reference recording at 1.5 times real speed. The shaded part of the plot is the training window
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/network_fit.png" width={100} alt="Top: the network's angle follows the truth in the training window and flattens to a constant at minus fifty degrees after it. Middle: its derivative follows the true velocity inside and goes to zero outside. Bottom: the velocity error of the network is comparable to the Savitzky-Golay derivative inside the training window and of the order of 1 rad/s outside, while the simulated physics model stays near a thousandth everywhere">
+
+Reference recording, network with four layers of 128 neurons. The angle is shown with the true offset subtracted
+
+</Figure>
+
+| reference recording | velocity error, training window ($0.5$ to $9.5\ \text{s}$) | angle error, test window | velocity error, test window |
+|---|---|---|---|
+| network $\hat\theta(t)$ | $0.040\ \text{rad/s}$ | $56^\circ$ | $0.99\ \text{rad/s}$ |
+| Savitzky–Golay derivative (2.2) | $0.060\ \text{rad/s}$ | | |
+| output error (2.4), simulated | $0.0018\ \text{rad/s}$ | $0.040^\circ$ | $0.0021\ \text{rad/s}$ |
+
+**Inside the training window** the network is a good smoother. Its velocity is 1.5 times more
+accurate than the Savitzky–Golay derivative of chapter 2, which is also a curve fit without a
+model, but it is 20 times less accurate than the physics model. Near the edges of the window,
+where it has data on one side only, its velocity error doubles ($0.087\ \text{rad/s}$ in the
+first and last half second).
+
+**Outside the training window** it knows nothing. Each $\tanh$ neuron levels off far from the
+data, so the network's curve flattens to a constant and its velocity goes to zero: an RMS angle
+error of $56^\circ$, against $0.04^\circ$ for the physics model. Nothing in the network says that
+a pendulum keeps swinging; it was only ever asked to reproduce ten seconds of numbers.
+
+The result does not hinge on the details:
+
+| network, reference recording | velocity error, training window | angle error, test window |
+|---|---|---|
+| 2 layers of 32 neurons | $0.065\ \text{rad/s}$ | $82^\circ$ |
+| 3 layers of 64 neurons | $0.097\ \text{rad/s}$ | $161^\circ$ |
+| 4 layers of 128 neurons | $0.040\ \text{rad/s}$ | $56^\circ$ |
+| the same, 20 000 steps instead of 6000 | $0.036\ \text{rad/s}$ | $54^\circ$ |
+| the same, two other random seeds | $0.038$ and $0.028\ \text{rad/s}$ | $52^\circ$ and $61^\circ$ |
+
+Larger networks fit the training window better, and no network extrapolates. The spread over
+random seeds, a factor 1.4 in the velocity error, is as large as most of the differences between
+the settings: one training run of a network is one sample of a random outcome. On the small
+swing the picture is the same: $0.015\ \text{rad/s}$ inside (Savitzky–Golay:
+$0.059\ \text{rad/s}$), and an angle error of $15^\circ$ outside, where the pendulum itself
+swings by less than $7^\circ$.
+
+### What we learned
+
+- A network can represent the measured curve, and automatic differentiation gives its
+  derivative for free: inside the training window it is a better smoother than
+  Savitzky–Golay.
+- What keeps a network with more weights than data from fitting the noise is the training
+  itself: it learns smooth, large-scale shapes first.
+- A model of the *trajectory* cannot forecast: it has learned what happened, not why. The
+  physics model, with three numbers, forecasts ten seconds ahead a thousand times more
+  accurately.
+
+## 3.3 The physics-informed neural network
+
+The network of section 3.2 knew nothing about pendulums. A **physics-informed neural network**
+(PINN) is the same network, told the equation of motion. It still represents the angle as a
+function of time, $\hat\theta(t)$, but it is now also asked to satisfy
+
+$$
+\ddot{\hat\theta} + \omega_0^2 \sin\hat\theta + \mu\dot{\hat\theta} = 0,
+$$
+
+with both time derivatives taken by automatic differentiation, at a set of **collocation
+points**: times where the equation is checked, whether or not there are measurements. The
+unknown parameters $\omega_0^2$, $\mu$ and the offset $b$ are trained together with the weights.
+The loss has two parts, the robust data loss of section 3.2 and the mean square of the
+equation's residual $r$:
+
+$$
+\mathcal L = \frac{1}{N}\sum_k \rho\left(\hat\theta(t_k) + b - y_k\right) +
+\lambda\thinspace\frac{1}{M}\sum_j \left(\frac{r(t_j)}{10}\right)^2,
+\qquad
+r = \ddot{\hat\theta} + \omega_0^2 \sin\hat\theta + \mu\dot{\hat\theta} .
+$$
+
+Dividing the residual by $10\ \text{rad/s}^2$, about $\omega_0^2$ times one radian, puts both
+parts on a comparable scale; the weight $\lambda$ sets the balance. The collocation points lie
+every $0.02\ \text{s}$ from $0$ to $10\ \text{s}$. With the offset now a separate parameter, the network
+represents the angle itself: physics is what separates $b$ from $\theta$.
+
+This is an inverse problem solved in an unusual way. Output error (2.4) also fits the
+parameters to the data through the equation, but it *solves* the equation with an
+integrator. The PINN never integrates: it searches for a curve and parameters that are
+consistent with the data and with the equation at the same time.
+
+### Making it train
+
+Trained naively, as in section 3.2 but with both losses from the start, the PINN fails. With a
+strong physics weight ($\lambda = 100$) it finds a **trivial solution**: a flat line at
+$\hat\theta = 0$ (within $0.01^\circ$), the hanging equilibrium, satisfies the equation almost exactly (residual
+loss $6 \cdot 10^{-10}$) whatever the parameters are, and the data loss is simply ignored. The
+angle error is $51^\circ$, and $\omega_0^2$ ends at a meaningless $6.69$.
+
+The standard remedy is used here: **first fit the data alone** for 3000 steps, as in
+section 3.2, then switch on the physics, its weight raised gradually from 0 to $\lambda$ over
+the next 2500 steps, and train both for 5000 steps in total. By the time the equation enters,
+the curve already looks like a pendulum, and the parameters only have to explain it. Training
+takes about 70 s.
+
+<Figure video="/media/pendulum-lab/pinn_training.mp4" width={100} alt="The network's curve first follows the measurements of the first ten seconds; below, after step 3000 the estimate of omega0 squared jumps from 8 towards 9.8 and settles on the true value">
+
+Reference recording, training window, $\lambda = 1$, seed 1. The step counter runs over both stages
+
+</Figure>
+
+### Results
+
+<Figure src="/media/pendulum-lab/pinn_parameters.png" width={100} alt="Estimates of omega0 squared and mu during training for three random seeds: two converge onto the true values within the band of the output-error fit, the third stays slightly off; below the data and physics losses, the physics loss of the converged runs ending thirty times lower">
+
+Reference recording, $\lambda = 1$. The insets zoom in on the last 3000 steps; the grey band is the output-error fit of section 2.4 with $\pm 2\sigma$
+
+</Figure>
+
+| PINN on the reference, training window | $\omega_0^2$ | $\mu$ | $b$ | physics loss | angle fit, training window | the parameters, simulated over the test window |
+|---|---|---|---|---|---|---|
+| no data stage, $\lambda = 100$ | $6.69$ | $0.086$ | $3.31^\circ$ | $6 \cdot 10^{-10}$ | $51^\circ$ | $18.5^\circ$ |
+| $\lambda = 0.01$ | $9.657$ | $0.2057$ | $0.81^\circ$ | $3 \cdot 10^{-3}$ | $0.67^\circ$ | $4.3^\circ$ |
+| $\lambda = 0.1$ | $9.756$ | $0.2030$ | $1.29^\circ$ | $6 \cdot 10^{-4}$ | $0.20^\circ$ | $1.6^\circ$ |
+| $\lambda = 1$, seed 0 | $9.800$ | $0.2019$ | $1.46^\circ$ | $5 \cdot 10^{-5}$ | $0.068^\circ$ | $0.28^\circ$ |
+| $\lambda = 1$, seed 1 | $9.8104$ | $0.2003$ | $1.470^\circ$ | $1.6 \cdot 10^{-6}$ | $0.043^\circ$ | $0.082^\circ$ |
+| $\lambda = 1$, seed 2 | $9.8103$ | $0.2003$ | $1.469^\circ$ | $1.1 \cdot 10^{-6}$ | $0.043^\circ$ | $0.078^\circ$ |
+| $\lambda = 10$ | $9.688$ | $0.2348$ | $1.57^\circ$ | $7 \cdot 10^{-5}$ | $3.6^\circ$ | $3.5^\circ$ |
+| output error (2.4), for comparison | $9.8099 \pm 0.0016$ | $0.2002 \pm 0.0002$ | $1.473^\circ$ | | | $0.040^\circ$ |
+| true | $9.81$ | $0.2$ | $1.5^\circ$ | | | |
+
+When it converges, **the PINN finds the same parameters as output error**, within its error
+bars, and its curve fits the training window as well as the physics model does. Its velocity
+inside the window, $\tfrac{d\hat\theta}{dt}$, is now accurate to $0.0021\ \text{rad/s}$, against
+$0.040\ \text{rad/s}$ for the network without physics: the equation is a far better regularizer
+than the implicit smoothness of section 3.2. The offset, which section 3.2 could not separate
+from the angle at all, is found to $0.03^\circ$.
+
+But "when it converges" carries weight. The physics weight has to be right within a factor of
+ten: too weak and the parameters are biased because the equation barely matters, too strong
+and the optimizer favors the equation over the data and the fit degrades. And even at the best
+weight, one of three random seeds stalls before converging ($\omega_0^2 = 9.800$, six output-error
+standard deviations off). It can be recognized without knowing the truth: its physics loss is
+thirty times higher than that of the converged runs. In practice one trains several seeds and
+keeps the run with the lowest loss. On the small swing the picture is the same: two seeds give
+$\omega_0^2 = 9.808$ and $9.817$ (output error: $9.8174 \pm 0.0043$), the third stalls at $9.725$.
+
+All of this takes about 70 s per run. Output error solves the same problem in under a second.
+
+### Forecasting, first attempt: extending the curve
+
+<Figure src="/media/pendulum-lab/pinn_fit.png" width={100} alt="Top: inside the training window both PINN networks follow the true angle; after it, the network with physics up to 10 s flattens like the plain network, the one with physics up to 20 s keeps oscillating for a while with a shrinking amplitude and then settles at zero, while the simulation with the PINN's parameters stays on the truth. Bottom: the equation residual of the first network jumps from a hundredth to several rad/s squared after 10 s; that of the second stays below one but is much larger than inside the training window">
+
+Reference recording, $\lambda = 1$, seed 1. The equation residual is in $\text{rad/s}^2$
+
+</Figure>
+
+The PINN's network is still a function of time. Outside the collocation points nothing
+constrains it, and after $10\ \text{s}$ it flattens just like the network of section 3.2
+($33^\circ$ RMS). The obvious fix is to enforce the equation beyond the data as well, with
+collocation points up to $20\ \text{s}$. It helps only a little: the network oscillates for one
+or two more swings, then decays to $\hat\theta = 0$, the trivial solution again ($13^\circ$ RMS),
+and the effort to satisfy the equation where there are no data pulls the parameters off
+($\mu = 0.233$). This is a known weakness of PINNs: the equation constrains each point only
+through its neighbors, and information propagates poorly over many periods of an oscillation.
+
+The identified model itself does forecast well: the PINN's parameters and its own estimate of
+the initial state, **simulated with an integrator**, are within $0.08^\circ$ of the truth over
+the test window, against $0.04^\circ$ for output error.
+
+### Forecasting, second attempt: solving the equation with a PINN
+
+Extending the fitted curve asks the network to do two jobs at once: reproduce the data and
+continue past it. A PINN can also be used the way it was originally introduced (Raissi,
+Perdikaris and Karniadakis, 2019): to **solve** a differential equation, with no data at all.
+After the identification, everything needed is known: the parameters, and the state at the
+end of the training window, read from the PINN's own curve and its derivative at
+$t_0 = 10\ \text{s}$ ($-37.46^\circ$ and $-0.585\ \text{rad/s}$, against $-37.54^\circ$ and
+$-0.590\ \text{rad/s}$ in truth). A fresh network $\hat\theta(t)$ is then trained on the
+equation residual and the initial conditions only:
+
+$$
+\mathcal L = \frac{1}{M}\sum_j \left(\frac{r(t_j)}{10}\right)^2 +
+100\left[\left(\hat\theta(t_0) - \theta_0\right)^2 +
+\left(\frac{\dot{\hat\theta}(t_0) - \dot\theta_0}{5}\right)^2\right],
+$$
+
+with the same residual $r$ as before, now with $\omega_0^2$ and $\mu$ fixed, at collocation
+points every $0.01\ \text{s}$. Each network is trained with Adam and then polished with L-BFGS,
+a quasi-Newton optimizer that is the usual final stage for PINNs.
+
+One network for the whole test window fails in the same way as before: after a swing and a
+half it decays to the trivial solution, $14^\circ$ RMS. The standard remedy is
+**time-marching**: cut the interval into short windows and solve them one after another, each
+window starting from the end state of the previous one. Within a window the equation only has
+to carry the solution over part of a swing.
+
+<Figure video="/media/pendulum-lab/pinn_forward_pendulum.mp4" width={100} alt="The true pendulum with two PINN pendulums: during the first ten seconds both follow the truth; afterwards the PINN curve extended past its data drifts to a standstill, while the PINNs solving the equation window by window keep swinging with the true pendulum">
+
+Reference recording at 1.5 times real speed. After 10 s: the curve of the identified PINN extended (teal), and the equation solved by PINNs in windows of 1 s (yellow)
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/pinn_forward.png" width={100} alt="Top: from ten seconds on, one PINN for the whole interval swings once and then decays to zero, while PINNs solving one second at a time lie on the true angle. Bottom: the angle error of a single PINN is around ten degrees, with two-second windows around one degree, and with one- or half-second windows it lies on top of the error of the integrator, around a tenth of a degree">
+
+Test window of the reference recording, solved from the identified parameters and state at $t = 10\ \text{s}$. Vertical lines: the 1 s windows
+
+</Figure>
+
+| solving the identified equation from $t = 10\ \text{s}$ | angle error vs truth | vs the integrator | time |
+|---|---|---|---|
+| one PINN for all 10 s | $14.2^\circ$ | $14.1^\circ$ | 62 s |
+| PINNs, windows of 2 s | $1.03^\circ$ | $1.05^\circ$ | 79 s |
+| PINNs, windows of 1 s | $0.099^\circ$ | $0.041^\circ$ | 133 s |
+| PINNs, windows of $0.5\ \text{s}$ | $0.103^\circ$ | $0.024^\circ$ | 245 s |
+| integrator (RK45), same parameters and state | $0.087^\circ$ | | $9\ \text{ms}$ |
+
+**So a PINN can predict the trajectory**, once it is used as an equation solver rather than as
+a curve fit. With windows of a second or less it reproduces the integrator's solution to a few
+hundredths of a degree, and what remains of the error against the truth, about $0.1^\circ$, is
+shared with the integrator: it comes from the identified parameters and initial state, not
+from the solver.
+
+**For this problem it is purely illustrative.** The integrator computes the same forecast
+fifteen thousand times faster, needs no training, no windows and no tuning, and is at least as
+accurate. That is the honest verdict for any ordinary, low-dimensional differential equation:
+classical solvers, whether time integrators, finite differences or finite elements, are faster
+and more accurate. PINNs earn their place where those methods struggle:
+
+- **Partial differential equations on complicated geometries**, where generating a good mesh is
+  the hard part, for example flow, heat or elasticity problems; the original PINN paper solved
+  the Burgers, Navier–Stokes and Schrödinger equations.
+- **High-dimensional equations**, where any grid grows exponentially with the dimension: the
+  Hamilton–Jacobi–Bellman equation of optimal control, or Black–Scholes-type equations for many
+  assets in finance. A network evaluated at random collocation points needs no grid.
+- **Inverse problems for whole fields from sparse data**, where the unknown is not three numbers
+  but a function of space and time: velocity and pressure in a flow inferred from images of a
+  dye, blood flow from noisy MRI, or a map of material stiffness from a few sensors. There the
+  equation fills in what the measurements cannot see.
+
+### What we learned
+
+- A PINN enforces the equation of motion on a network $\hat\theta(t)$ through an extra loss,
+  and learns the parameters along with the weights.
+- It needs care to train: without a data-only stage it collapses to the trivial solution
+  $\hat\theta = 0$; the physics weight must be balanced; some seeds stall.
+- When it converges it matches output error, the offset included, and its curve and velocity
+  inside the training window are as good as the physics model's.
+- Its fitted curve does not forecast. Used as an equation solver instead, from the identified
+  parameters and state, and with time-marching over short windows, a PINN does predict the
+  trajectory, as accurately as an integrator and fifteen thousand times more slowly. Its
+  strengths lie with partial differential equations and fields, not with a pendulum.
+
+## 3.4 The Neural ODE: learning the dynamics
+
+Sections 3.2 and 3.3 both learned the *trajectory*, a function of time, and neither fitted
+curve could forecast; the PINN only did once it was put to work solving the identified
+equation anew. The lesson of chapter 1 is that a pendulum is not described by its trajectory but by
+its **vector field**: the rule that turns any state into its rate of change. A **Neural ODE**
+learns that rule. The kinematics stay exact, and only the acceleration is a network
+$g$ of the state:
+
+$$
+\dot\varphi = \dot\varphi,
+\qquad
+\ddot\varphi = g(\varphi, \dot\varphi),
+$$
+
+where $g$ has three hidden layers of 64 neurons (8600 weights) and knows nothing about
+sines, gravity or friction. To predict, the model is integrated like any other ODE, here with
+the classical fourth-order Runge–Kutta (RK4) step at the sample time.
+
+One detail matters. A black box has no idea that the pendulum hangs at $\theta = 0$: it can
+just as well learn an equilibrium anywhere. The offset $b$ can therefore not be separated from
+the angle, as in section 3.2, and the model lives in the sensor's own frame,
+$\varphi = \theta + b$. The comparisons below shift the truth accordingly.
+
+### Training in two stages
+
+The two classical routes of chapter 2 both work with a network in place of the pendulum
+equation, and they are used one after the other:
+
+1. **Equation error, as in section 2.2.** Fit $g$ to the accelerations of the Savitzky–Golay
+   smoothing, $g(\varphi_k, \dot\varphi_k) \approx \ddot\varphi_k$, sample by sample. This is
+   plain regression with no integration and takes a few seconds.
+2. **Simulation error, as in section 2.4.** Train through the integrator: simulate the model,
+   compare with the measurements, and differentiate the robust loss through every RK4 step.
+   Simulating the whole training window at once would let any early error grow over ten
+   swings, so the window is cut into segments of $0.25\ \text{s}$, each with its own trainable
+   initial state (**multiple shooting**), and a penalty keeps the end of each segment close to
+   the start of the next. All 40 segments are simulated in parallel.
+
+Both stages together take about 90 s.
+
+### Inside the visited region
+
+<Figure src="/media/pendulum-lab/node_vector_field.png" width={100} alt="Three phase-plane maps of the acceleration: the true one varies like minus sine of the angle; the learned one matches it in a band around the training trajectory and deviates further away; the absolute error is below a tenth of a rad/s squared along the trajectory and grows to tens of rad/s squared near plus and minus 180 degrees">
+
+Reference recording, seed 0. White dots: the states the training data visited
+
+</Figure>
+
+The network learns the vector field where the data went, and only there. Along the training
+trajectory its acceleration is within $0.11\ \text{rad/s}^2$ RMS of the truth, about 1.3% of
+the largest acceleration on the swing. Beyond it, towards the inverted position, the error
+grows to tens of $\text{rad/s}^2$: a $\tanh$ network levels off where it has no data, while the
+true acceleration turns back to zero at the top.
+
+<Figure src="/media/pendulum-lab/node_forecast.png" width={100} alt="Top: the Neural ODE simulated from the start follows the true angle over both training and test window, with a small phase drift. Bottom: its angle error is a few degrees for all three seeds, the model after equation error alone around one to two degrees, and the simulated output-error fit near a twentieth of a degree">
+
+Reference recording. The Neural ODE is simulated from its initial state over the whole 20 s, without any measurement
+
+</Figure>
+
+| reference recording | acceleration error on the trajectory | angle error, training window | angle error, test window |
+|---|---|---|---|
+| network $\hat\theta(t)$ (3.2) | | $0.15^\circ$ (a fit, not a simulation) | $56^\circ$ |
+| Neural ODE after equation error, seeds 0, 1, 2 | $0.14$ to $0.16\ \text{rad/s}^2$ | $2.3$ to $2.5^\circ$ | $1.5$ to $2.8^\circ$ |
+| the same, after multiple shooting | $0.11$ to $0.15\ \text{rad/s}^2$ | $4.0$ to $5.0^\circ$ | $2.9$ to $4.3^\circ$ |
+| output error (2.4), simulated | | $0.04^\circ$ | $0.04^\circ$ |
+
+**This is the first learned model that forecasts.** Simulated from its initial state for 20 s,
+ten seconds beyond its data, it stays within a few degrees of the true angle, where the
+trajectory network of section 3.2 was off by $56^\circ$. The test window is no problem for
+it: the swings there are smaller than the ones it was trained on, so every state it reaches
+lies inside the region it has seen. Learning the rule instead of the record is what makes the
+difference.
+
+The physics model is still forty to a hundred times more accurate. An acceleration error of 1% looks
+small, but it changes the period slightly, and a phase error accumulates over ten swings.
+
+The second stage is honest bad news. Training through the integrator makes the learned
+acceleration slightly more accurate along the trajectory, yet the 20 s simulation gets
+*worse* for all three seeds. Each segment only spans $0.25\ \text{s}$, a tenth of a swing, so
+the loss rewards local agreement and says little about the period. Longer segments did not
+help either in trials: one-second segments left the forecast at $2.5$ to $2.6^\circ$. With
+this much data and this little noise, the cheap first stage was the better model.
+
+### Reading physics out of the network
+
+The network is a black box, but it can be asked what it learned. Fitting
+$g(\varphi, \dot\varphi) \approx -a\sin(\varphi - \beta) - c\thinspace\dot\varphi$ to it over the
+visited states gives an effective $\omega_0^2 = a$, $\mu = c$ and offset $b = \beta$:
+
+| distilled from the Neural ODE, reference | $\omega_0^2$ | $\mu$ | $b$ |
+|---|---|---|---|
+| after equation error (all three seeds) | $9.725$ | $0.199$ | $1.50^\circ$ |
+| after multiple shooting | $9.792$ to $9.802$ | $0.209$ to $0.210$ | $1.35^\circ$ to $1.45^\circ$ |
+| regression on the equation (2.2), same window | $9.726$ | $0.199$ | |
+| output error (2.4), same window | $9.810$ | $0.200$ | $1.47^\circ$ |
+
+After the first stage, the network has learned *exactly* what the linear regression of
+section 2.2 learned from the same smoothed derivatives, to three digits and including its
+bias: smoothing flattens the peaks of the acceleration, and $\omega_0^2$ comes out 0.9% low. The
+flexible model does not escape the flaws of its training data. Training through the
+integrator moves $\omega_0^2$ towards the truth but pulls $\mu$ away from it.
+
+### Outside the visited region
+
+<Figure video="/media/pendulum-lab/neural_ode_releases.mp4" width={100} alt="Four pairs of pendulums released together: at 60 and 120 degrees the Neural ODE swings with the true pendulum; released at 170 degrees it falls faster and runs ahead; pushed from the bottom with 8 rad/s the true pendulum goes over the top while the Neural ODE turns back">
+
+The Neural ODE trained on the reference recording (released at $120^\circ$), released from four new states, real time
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/node_releases.png" width={100} alt="Angle over five seconds for four releases. Top row, model trained on the reference: agreement at 60 and 120 degrees, a growing phase error at 170 degrees, and no rotation when pushed with 8 rad/s. Bottom row, model trained on the small swing: good at 60 degrees, a visible phase error at 120 degrees, wrong at 170 degrees and for the push">
+
+Each column is a new initial state; the rows are Neural ODEs trained on different recordings
+
+</Figure>
+
+| angle error over 5 s | released at $60^\circ$ | at $120^\circ$ | at $170^\circ$ | pushed at $0^\circ$ with $8\ \text{rad/s}$ |
+|---|---|---|---|---|
+| trained on the reference (up to $120^\circ$) | $0.6$ to $0.7^\circ$ | $1.8$ to $2.4^\circ$ | $65$ to $68^\circ$ | about $600^\circ$ |
+| trained on the small swing (up to $20^\circ$) | $2.8^\circ$ | $12.8^\circ$ | $106^\circ$ | about $600^\circ$ |
+
+A Neural ODE generalizes to **new initial conditions inside the region its data covered**, and
+fails outside it. Released at $170^\circ$, beyond the $120^\circ$ it saw, the reference model
+falls too fast and runs ahead. Pushed hard enough to go over the top, the true pendulum
+rotates, but the learned one has never seen the inverted position and turns back. The model
+trained on the small swing already misses at $120^\circ$, where it would have to know how the
+restoring torque bends away from linear. The pendulum equation, fitted to the same small
+swing, knows that $\sin\theta$ continues all the way around.
+
+### What we learned
+
+- Learning the vector field instead of the trajectory makes a learned model that forecasts:
+  a few degrees after 20 s, against $56^\circ$ for the trajectory network.
+- The network is only as good as its data: it reproduces the field where the training data
+  went, inherits the bias of the derivatives it was trained on, and is wrong elsewhere.
+- Training through the integrator with short segments did not improve the long-term forecast
+  here; it is the standard method, not automatically the better one.
+- A black box cannot tell the offset from the angle and needs 8600 weights for what the
+  physics says with three numbers, forty to a hundred times more accurately.
+
+## 3.5 Physics plus a network
+
+The Neural ODE threw away everything known about pendulums. A **hybrid model** keeps the physics
+and adds a network $g$ only for what the physics misses:
+
+$$
+\ddot\theta = -\omega_0^2 f(\theta) - \mu\dot\theta + g(\theta, \dot\theta) .
+$$
+
+Because the physics fixes the hanging equilibrium at $\theta = 0$, the offset $b$ is again a
+separate parameter. The idea is attractive: the physics carries the structure and extrapolates,
+the network mops up the rest.
+
+To test it, the physics must be missing something, and the frozen recordings were generated by
+the exact pendulum equation. So the physics is deliberately made incomplete: the **small-angle
+model** of section 1.3, $f(\theta) = \theta$, which on the $120^\circ$ reference misses the
+nonlinear part $-\omega_0^2(\sin\theta - \theta)$ of the gravity torque. As a control, the
+same network is also added to the complete pendulum equation, $f(\theta) = \sin\theta$, where
+there is nothing to correct.
+
+### Look at the residuals first
+
+Before adding a network, it is worth asking whether the physics leaves anything to learn. The
+residuals of output error (2.4) answer that:
+
+<Figure src="/media/pendulum-lab/hybrid_residuals.png" width={100} alt="Top: the residuals of the small-angle model oscillate with an amplitude of 15 to 45 degrees, clearly structured. Bottom: the residuals of the pendulum equation are white noise of about half a degree, with a few outliers marked as triangles at the edges">
+
+Reference recording, training window. Triangles mark residuals beyond the plotted range
+
+</Figure>
+
+The small-angle model leaves a large, slowly varying pattern, the signature of missing
+dynamics. Its fit also distorts what it can: $\omega_0^2 = 7.93$ instead of $9.81$, and an
+initial state of $83^\circ$ and $3.7\ \text{rad/s}$ for a pendulum released at rest from
+$120^\circ$. The pendulum equation leaves only the sensor noise and its outliers: there is
+nothing for a network to find.
+
+### Two ways to train
+
+**Joint:** physics parameters and network together, in the same two stages as the Neural ODE
+(equation error, then multiple shooting), with a penalty on the size of $g$ so that the physics
+explains as much as it can. **Sequential:** the physics alone first, by output error; then,
+with its parameters frozen, the network learns what is left. Both take about 25 s.
+
+<Figure src="/media/pendulum-lab/hybrid_correction.png" width={100} alt="The correction learned by the network along the angle axis at zero velocity. Left, small-angle physics: the learned corrections follow the needed correction near the turning points and level off beyond 120 degrees, where the needed correction keeps growing. Right, pendulum physics: the needed correction is zero, but the learned ones wiggle by up to 4 rad/s squared near the center, where the training data never had zero velocity">
+
+Reference recording. Shaded: the angles where the training data reached zero velocity, the turning points of the swing
+
+</Figure>
+
+<Figure video="/media/pendulum-lab/hybrid_pendulum.mp4" width={100} alt="The true pendulum, the small-angle model and the small-angle model with a correction network swinging together; the small-angle model is visibly out of step, the hybrid stays close to the truth in the training window and drifts somewhat after it">
+
+Reference recording at 1.5 times real speed; both models were fitted to the shaded first 10 s
+
+</Figure>
+
+<Figure src="/media/pendulum-lab/hybrid_forecast.png" width={100} alt="Angle error over twenty seconds on a logarithmic scale: the small-angle model alone around 10 to 40 degrees, with a network around 1 to 15 degrees, the pendulum equation alone below a tenth of a degree, and the pendulum equation with a network growing from below one degree in the training window to about 15 degrees in the test window">
+
+Reference recording, seed 0, simulated from the start
+
+</Figure>
+
+| reference recording, three seeds | $\omega_0^2$ | angle error, training window | angle error, test window | released at $170^\circ$, 5 s |
+|---|---|---|---|---|
+| small-angle model alone | $7.93$ | $12.2^\circ$ | $23.4^\circ$ | |
+| small-angle model plus a network, sequential | $7.93$ (frozen) | $6.8$ to $7.2^\circ$ | $5.4$ to $12.8^\circ$ | $122$ to $132^\circ$ |
+| small-angle model plus a network, joint | $7.27$ to $7.28$ | $4.2$ to $4.5^\circ$ | $7.9$ to $10.9^\circ$ | $120$ to $125^\circ$ |
+| pendulum equation alone | $9.810$ | $0.036^\circ$ | $0.040^\circ$ | $0.04^\circ$ |
+| pendulum equation plus a network, sequential | $9.810$ (frozen) | $0.39$ to $0.58^\circ$ | $9.5$ to $16.1^\circ$ | $1$ to $10^\circ$ |
+| pendulum equation plus a network, joint | $8.73$ to $8.77$ | $2.2$ to $2.4^\circ$ | $5.4$ to $5.6^\circ$ | $14$ to $18^\circ$ |
+| Neural ODE (3.4), for comparison | | $4.0$ to $5.0^\circ$ | $2.9$ to $4.3^\circ$ | $65$ to $68^\circ$ |
+
+**When the physics is incomplete, the network helps.** It learns the missing part of the
+gravity torque near the turning points of the swing, and the forecast error drops from
+$23^\circ$ to between 5 and $13^\circ$. That is useful, but no better than the Neural ODE
+without any physics, and the correction levels off beyond the $120^\circ$ it saw, where the
+true missing term keeps growing. Released at $170^\circ$, the hybrid is as wrong as the
+small-angle model itself: the network cannot add what the data never showed it.
+
+**When trained jointly, the parameters lose their meaning.** The network and the physics can
+trade one for the other: a smaller $\omega_0^2$ with a larger correction fits the data just as
+well. With the small-angle model, $\omega_0^2$ ends at $7.27$; with the complete pendulum
+equation, it is pulled from $9.81$ down to $8.73$, even though the physics was exactly right.
+Without the penalty on the network's size, it is worse still: in a trial run the offset $b$ drifted to $20^\circ$.
+
+**When the physics is complete, adding a network does harm.** The sequential hybrid keeps the
+exact parameters, yet its forecast degrades from $0.04^\circ$ to between 10 and $16^\circ$.
+There is nothing left to learn but noise, and the network learns it: the correction wiggles by
+up to $4\ \text{rad/s}^2$ near $\theta = 0$, at zero velocity, a state the training data never
+visited because the pendulum always passes the bottom at speed. Simulated forward, those
+wiggles are enough to throw the swing off.
+
+### What we learned
+
+- A hybrid model helps exactly when the physics misses something, and the residuals of the
+  physics alone show whether it does. Adding a network to a model whose residuals are already
+  noise only adds error.
+- Trained together, physics and network are not identifiable: the network absorbs part of the
+  physics and the parameters drift, even when the physics is exact.
+- The network's part generalizes no further than the data, so the hybrid extrapolates no better
+  than its physics.
+
+## Chapter summary
+
+This chapter asked the question of chapter 2, *what do the measurements say about the
+pendulum?*, with increasingly flexible model classes, and tested every answer on the same task:
+fit the first 10 s of the reference recording, forecast the last 10.
+
+| method (reference recording) | what is learned | $\omega_0^2$ | forecast, test window | released at $170^\circ$ | training |
+|---|---|---|---|---|---|
+| output error (2.4) | 3 parameters | $9.810 \pm 0.002$ | $0.04^\circ$ | $0.04^\circ$ | under 1 s |
+| network for the trajectory (3.2) | $\theta(t)$, 50 000 weights | | $56^\circ$ | | 20 s |
+| PINN (3.3), converged seeds | $\theta(t)$ and 3 parameters | $9.810$ | curve: $33^\circ$; equation solved by PINNs: $0.10^\circ$ | | 70 s, plus 133 s to solve |
+| Neural ODE (3.4) | the vector field, 8600 weights | $9.73$ to $9.80$, distilled | $1.5$ to $4.3^\circ$ | $65$ to $68^\circ$ | 90 s |
+| small-angle model plus a network (3.5) | physics and a correction | $7.3$ to $7.9$ | $5$ to $13^\circ$ | $120$ to $132^\circ$ | 25 s |
+
+Every learned model was trained on data from a pendulum that follows the pendulum equation
+exactly, and none of them beat that equation fitted by output error. Three lessons stand out:
+
+- **Learn the dynamics, not the trajectory.** A curve fitted in time, physics-informed or not,
+  has learned what happened, not why, and cannot be extended. The models that forecast are the
+  ones that hold a rule for how the state evolves: the Neural ODE's vector field, or the
+  identified equation, whether it is then solved by an integrator or by PINNs.
+- **A flexible model is only as good as the region its data covered.** Inside it, the Neural
+  ODE is within a few degrees; outside it, every learned part fails. Physics, by contrast,
+  carries over to states that were never observed.
+- **More flexibility is not free.** Each step down the ladder needed more care to train (data
+  stages, physics weights, seeds, penalties) and gave up something: interpretable parameters, the
+  separation of offset and angle, or accuracy.
+
+None of this makes learning useless. The pendulum is the easiest possible case for physics: its
+equation is known and exact. The learned models earn their place when the physics is
+incomplete, which the small-angle experiment imitated and the Furuta pendulum of chapter 6 may
+make real. The next chapter puts all identification methods side by side on the same frozen
+data.
+
+**Next:** chapter 4 · the identification benchmark.
