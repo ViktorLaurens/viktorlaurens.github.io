@@ -1,4 +1,6 @@
 ---
+import { Image } from 'astro:assets';
+import portrait from '../assets/portrait.jpg';
 import Base from '../layouts/Base.astro';
 
 const experience = [
@@ -54,6 +56,7 @@ const tools = [
 <Base title="About" description="Who I am: an engineer in control, learning and robotics from Brussels, with a weakness for nonlinear dynamics.">
   <section class="section container about">
     <div class="about__intro">
+      <Image class="about__photo" src={portrait} alt="Portrait of Viktor Laurens De Groote" width={440} height={520} densities={[1, 2]} loading="eager" />
       <p class="eyebrow eyebrow--accent">About</p>
       <h1>Viktor Laurens De Groote</h1>
       <div class="prose" style="margin-top: var(--space-6)">
@@ -138,6 +141,8 @@ const tools = [
   .about { display: grid; gap: var(--space-16); }
   @media (min-width: 980px) { .about { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-24); } }
   .about__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-8); }
+  .about__photo { width: 200px; height: 236px; object-fit: cover; object-position: center 25%; border-radius: var(--radius-lg); border: 1px solid var(--line); margin-bottom: var(--space-8); filter: grayscale(1); }
+  @media (max-width: 540px) { .about__photo { width: 150px; height: 177px; } }
   .h3 { font-size: 1.1rem; margin-top: var(--space-12); margin-bottom: var(--space-4); }
   .about__side > .h3:first-child { margin-top: 0; }
   .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-6); }

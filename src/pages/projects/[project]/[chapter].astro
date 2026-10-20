@@ -97,7 +97,8 @@ const num = String(number).padStart(2, '0');
   .side ol { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: .35em; border-left: 1px solid var(--line); }
   .side a { display: block; padding: .15em 0 .15em .9em; color: var(--fg-muted); text-decoration: none; border-left: 1.5px solid transparent; margin-left: -1px; line-height: 1.4; }
   .side a:hover { color: var(--fg); border-left-color: var(--accent); }
-  .side a[aria-current="page"] { color: var(--fg); border-left-color: var(--accent); }
+  .side a[aria-current="page"], .side a[aria-current="location"] { color: var(--fg); border-left-color: var(--accent); }
+  .side .toc a { transition: color .15s var(--ease), border-color .15s var(--ease); }
   .side .mono { color: var(--fg-faint); font-size: .8em; margin-right: .3em; }
   @media (max-width: 1099px) { .side { position: static; max-height: none; } .toc { display: none; } .side ol { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); border: 0; } .side a { border: 1px solid var(--line); border-radius: var(--radius); padding: .5em .8em; margin: 0; } }
   .chapter-prose { max-width: 72ch; }

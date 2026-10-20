@@ -13,7 +13,7 @@ const { src, video, alt, width = 100 } = Astro.props;
 ---
 <figure class="fig" style={`--w: ${width}%`}>
   {video ? (
-    <video class="fig__media" src={video} autoplay loop muted playsinline preload="metadata" aria-label={alt}></video>
+    <video class="fig__media" src={video} loop muted playsinline preload="metadata" data-autoplay aria-label={alt}></video>
   ) : (
     <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" />
   )}

@@ -87,7 +87,7 @@ const chapterSlug = (id: string) => id.split('/').pop();
   .toc { position: sticky; top: 88px; font-size: .9rem; }
   .toc ol { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: .4em; border-left: 1px solid var(--line); }
   .toc a { display: block; padding: .15em 0 .15em .9em; color: var(--fg-muted); text-decoration: none; border-left: 1.5px solid transparent; margin-left: -1px; }
-  .toc a:hover { color: var(--fg); border-left-color: var(--accent); }
+  .toc a:hover, .toc a[aria-current="location"] { color: var(--fg); border-left-color: var(--accent); }
   @media (max-width: 1023px) { .toc { position: static; } }
   @media (max-width: 540px) { .chapter { grid-template-columns: 2.2rem minmax(0, 1fr); } .chapter__arrow { display: none; } .chapter__num { font-size: 1.1rem; } }
 </style>

@@ -1,0 +1,50 @@
+---
+/** Interactive phase portrait. Engine in src/sim/phase.ts. */
+---
+<div class="demo" data-demo="phase">
+  <div class="demo__head">
+    <span class="demo__label">Live · try it</span>
+    <span class="demo__hint">Click or drag in the plane to release pendulums. Move the sliders and the field re-draws.</span>
+  </div>
+  <canvas data-phase-canvas aria-label="Interactive phase portrait of the damped pendulum. Click to release a trajectory from that state; sliders change the damping and the natural frequency."></canvas>
+  <div class="demo__controls">
+    <div class="demo__control">
+      <label>damping μ <output data-out="mu">0.25</output> s⁻¹</label>
+      <input type="range" data-ctl="mu" min="0" max="2.5" step="0.01" value="0.25" />
+    </div>
+    <div class="demo__control">
+      <label>ω₀² = g/L <output data-out="w0">9.81</output> s⁻²</label>
+      <input type="range" data-ctl="w0" min="2" max="25" step="0.01" value="9.81" />
+    </div>
+    <div class="demo__buttons">
+      <button class="btn btn--sm" type="button" data-act="seed">Release 6 at random</button>
+      <button class="btn btn--sm" type="button" data-act="clear">Clear</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { mountPhase, type PhaseHandle } from '../sim/phase';
+
+  const handles: PhaseHandle[] = [];
+
+  function init() {
+    document.querySelectorAll<HTMLElement>('[data-demo="phase"]').forEach((root) => {
+      const canvas = root.querySelector<HTMLCanvasElement>('[data-phase-canvas]');
+      if (!canvas) return;
+      const sim = mountPhase(canvas);
+      handles.push(sim);
+      const mu = root.querySelector<HTMLInputElement>('[data-ctl="mu"]')!;
+      const w0 = root.querySelector<HTMLInputElement>('[data-ctl="w0"]')!;
+      const outMu = root.querySelector<HTMLOutputElement>('[data-out="mu"]')!;
+      const outW0 = root.querySelector<HTMLOutputElement>('[data-out="w0"]')!;
+      mu.addEventListener('input', () => { outMu.value = Number(mu.value).toFixed(2); sim.setMu(Number(mu.value)); });
+      w0.addEventListener('input', () => { outW0.value = Number(w0.value).toFixed(2); sim.setW0sq(Number(w0.value)); });
+      root.querySelector('[data-act="seed"]')?.addEventListener('click', () => sim.seedRandom(6));
+      root.querySelector('[data-act="clear"]')?.addEventListener('click', () => sim.clear());
+    });
+  }
+
+  document.addEventListener('astro:page-load', init);
+  document.addEventListener('astro:before-swap', () => { handles.splice(0).forEach((h) => h.destroy()); });
+</script>

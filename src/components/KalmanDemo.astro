@@ -1,0 +1,86 @@
+---
+/** Live Kalman / extended Kalman filtering demo. Engine in src/sim/kalman.ts. */
+---
+<div class="demo" data-demo="kalman">
+  <div class="demo__head">
+    <span class="demo__label">Live · try it</span>
+    <span class="demo__hint">The filter sees only the yellow measurements. Make them worse, switch the filter, turn the gate off, kick the pendulum when the gate is on and watch it reject the truth for a moment before it lets go.</span>
+  </div>
+  <canvas data-kalman-canvas aria-label="Live simulation: a pendulum, its noisy angle measurements, and the Kalman filter's estimate of angle and angular velocity with its uncertainty band."></canvas>
+  <div class="demo__controls">
+    <div class="demo__control">
+      <label>measurement noise σ <output data-out="sigma">1.0</output>°</label>
+      <input type="range" data-ctl="sigma" min="0.1" max="6" step="0.1" value="1.0" />
+    </div>
+    <div class="demo__control">
+      <label>outliers <output data-out="out">2</output> %</label>
+      <input type="range" data-ctl="out" min="0" max="15" step="0.5" value="2" />
+    </div>
+    <div class="demo__control">
+      <label>process noise q = 10<sup><output data-out="q">-4</output></sup></label>
+      <input type="range" data-ctl="q" min="-7" max="-1" step="0.1" value="-4" />
+    </div>
+    <div class="demo__buttons">
+      <span class="seg" role="group" aria-label="Filter">
+        <button type="button" data-filter="kf" aria-pressed="false">Linear KF</button>
+        <button type="button" data-filter="ekf" aria-pressed="true">EKF</button>
+      </span>
+      <button class="btn btn--sm" type="button" data-act="gate" aria-pressed="true">Gate outliers</button>
+      <button class="btn btn--sm" type="button" data-act="kick">Kick</button>
+    </div>
+  </div>
+  <div class="demo__stats">
+    <span>velocity RMS error <b data-stat="rms">–</b> rad/s</span>
+    <span>mean NIS <b data-stat="nis">–</b> <span class="faint">(1 is consistent)</span></span>
+    <span>outliers in window <b data-stat="out">–</b>, rejected <b data-stat="rej">–</b></span>
+  </div>
+</div>
+
+<script>
+  import { mountKalman, type KalmanHandle } from '../sim/kalman';
+
+  const handles: KalmanHandle[] = [];
+
+  function init() {
+    document.querySelectorAll<HTMLElement>('[data-demo="kalman"]').forEach((root) => {
+      const canvas = root.querySelector<HTMLCanvasElement>('[data-kalman-canvas]');
+      if (!canvas) return;
+      const rms = root.querySelector('[data-stat="rms"]')!;
+      const nis = root.querySelector('[data-stat="nis"]')!;
+      const out = root.querySelector('[data-stat="out"]')!;
+      const rej = root.querySelector('[data-stat="rej"]')!;
+      const sim = mountKalman(canvas, (s) => {
+        rms.textContent = s.rmsVel.toFixed(3);
+        nis.textContent = s.nis.toFixed(2);
+        out.textContent = String(s.outliers);
+        rej.textContent = String(s.rejected);
+      });
+      handles.push(sim);
+
+      const bind = (name: string, fmt: (v: number) => string, apply: (v: number) => void) => {
+        const input = root.querySelector<HTMLInputElement>(`[data-ctl="${name}"]`)!;
+        const output = root.querySelector<HTMLOutputElement>(`[data-out="${name}"]`)!;
+        input.addEventListener('input', () => { output.value = fmt(Number(input.value)); apply(Number(input.value)); });
+      };
+      bind('sigma', (v) => v.toFixed(1), (v) => sim.setSigmaDeg(v));
+      bind('out', (v) => String(v), (v) => sim.setOutlierPct(v));
+      bind('q', (v) => v.toFixed(1), (v) => sim.setLogQ(v));
+
+      const filters = root.querySelectorAll<HTMLButtonElement>('[data-filter]');
+      filters.forEach((b) => b.addEventListener('click', () => {
+        filters.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        sim.setFilter(b.dataset.filter as 'kf' | 'ekf');
+      }));
+      const gateBtn = root.querySelector<HTMLButtonElement>('[data-act="gate"]')!;
+      gateBtn.addEventListener('click', () => {
+        const on = gateBtn.getAttribute('aria-pressed') !== 'true';
+        gateBtn.setAttribute('aria-pressed', String(on));
+        sim.setGate(on);
+      });
+      root.querySelector('[data-act="kick"]')?.addEventListener('click', () => sim.kick());
+    });
+  }
+
+  document.addEventListener('astro:page-load', init);
+  document.addEventListener('astro:before-swap', () => { handles.splice(0).forEach((h) => h.destroy()); });
+</script>

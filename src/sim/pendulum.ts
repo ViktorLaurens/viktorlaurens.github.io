@@ -84,11 +84,11 @@ export function rk4(theta: number, omega: number, u: number, dt: number): [numbe
 
 // --- rendering ---------------------------------------------------------------
 
-interface Palette {
+export interface Palette {
   fg: string; muted: string; faint: string; line: string; accent: string; yellow: string; red: string; field: string; bg: string;
 }
 
-function readPalette(el: HTMLElement): Palette {
+export function readPalette(el: HTMLElement): Palette {
   const cs = getComputedStyle(el);
   const v = (n: string, fb: string) => cs.getPropertyValue(n).trim() || fb;
   return {
