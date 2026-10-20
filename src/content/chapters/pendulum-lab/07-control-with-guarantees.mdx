@@ -1,0 +1,949 @@
+---
+project: pendulum-lab
+number: 7
+title: "Control with guarantees"
+summary: "Why simple control fails, then LQR and LQG with a region of attraction, energy-based swing-up, trajectory optimisation with TVLQR, robustness and adaptation, constrained and nonlinear MPC, and safety filters."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 6 built everything a controller needs: an identified model of the Furuta pendulum,
+a simulator, encoders and an estimator for the velocities. This chapter uses them to **act**:
+balance the pendulum upright, swing it up from hanging, and keep doing so when the model is
+wrong, the input is limited and someone pushes the pendulum. Throughout, the aim is not only
+controllers that work in simulation, but controllers whose behaviour can be **argued for**:
+stability regions, proofs and guarantees, which chapter 8 will need when learning enters the
+loop (see the [storyline](/projects/pendulum-lab/#the-storyline-one-problem-four-questions)).
+
+The code is in `src/pendulum_lab/furuta_control.py`;
+the numbers come from `scripts/evaluate_control.py`.
+
+**The test loop.** Every controller is designed on the model identified in section 6.5 and
+tested on the "real" pendulum of chapter 6, dry friction included, as it would meet it on a
+lab bench:
+
+- the controller sees only the two encoders, read at $500\ \text{Hz}$;
+- its voltage is held until the next sample and cut off at the amplifier's $\pm 10$ V;
+- the real pendulum moves on in between, simulated with RK4.
+
+## 7.1 Why simple control fails
+
+### The upright position, linearized
+
+Near the upright position, $\theta = \pi$, small deviations
+$\tilde{\mathbf x} = (\alpha, \theta - \pi, \dot\alpha, \dot\theta)$ follow the linearized
+equations of motion, $\dot{\tilde{\mathbf x}} = A \tilde{\mathbf x} + B V$. For the identified
+model:
+
+$$
+A = \begin{bmatrix} 0 & 0 & 1 & 0 \cr 0 & 0 & 0 & 1 \cr 0 & 55.2 & {-1.14} & {-0.04} \cr 0 & 168.6 & {-1.13} & {-0.11} \end{bmatrix},
+\qquad
+B = \begin{bmatrix} 0 \cr 0 \cr 18.4 \cr 18.2 \end{bmatrix}.
+$$
+
+Dry friction is left out of the linearization: its smoothed sign is far steeper at zero speed
+than anything else in the model, and a straight line through it means nothing. It is treated
+as a disturbance in section 7.5.
+
+The four poles, the eigenvalues of $A$, are $12.8$, $0$, $-0.77$ and $-13.2$ per second:
+
+- **$+12.8$** is the pendulum falling: a tilt doubles every 54 ms.
+- **$0$** is the arm: at rest, it can stay at any angle.
+- **$-0.77$** is the arm's speed, slowed by friction and the motor's back-EMF.
+- **$-13.2$** is the mirror image of the falling pole.
+
+The system is **controllable**: the matrix $[B, AB, A^2B, A^3B]$ has full rank, so the single
+voltage can steer all four states. Controllable does not mean easy. Which measurements the
+controller uses decides how hard it is.
+
+### What each angle can see
+
+A controller that uses one angle only sees the transfer function from the voltage to that
+angle. Its **zeros**, the frequencies the angle does not respond to, show what that controller
+can and cannot do:
+
+- **From $V$ to $\theta$: a double zero at $s = 0$.** The pendulum feels the arm's
+  *acceleration*, never its angle or a constant speed. A controller that watches only the
+  pendulum is blind to where the arm is.
+- **From $V$ to $\alpha$: zeros at $-10.7$ and $+10.6$.** The zero in the right half-plane makes
+  the arm **non-minimum phase**: to move the arm one way while staying balanced, it must first
+  move the other way, to tilt the pendulum into the direction of travel. It also sits right
+  next to the falling pole at $+12.8$. For any controller that sees only $\alpha$, this
+  combination forces the sensitivity peak, the worst amplification of a disturbance at any
+  frequency, to be at least $\tfrac{p + z}{p - z} = \tfrac{12.8 + 10.6}{12.8 - 10.6} = 11$.
+  Robust designs aim for less than 2.
+
+So neither angle on its own will do. The usual first attempt, a PID controller on the
+pendulum's angle, shows what that means in practice.
+
+### PID on the pendulum
+
+The controller is $V = -(k_p e + k_i \int e \thinspace dt + k_d \dot e)$ with
+$e = \theta - \pi$, the derivative from encoder differences through a low-pass filter as in
+6.6. A tilt pulls the arm underneath the pendulum, exactly as you would balance a broom on
+your hand. Started $3^\circ$ from upright:
+
+<Figure src="/media/pendulum-lab/control_pid.png" width={100} alt="Left: the pendulum's tilt over 10 s; with PD it stays within about a degree for three seconds, then falls; with PID it stays within half a degree. Middle: the arm angle in turns on a logarithmic scale; with PD the arm spins up to more than a hundred turns, with PID it drifts by 3.4 turns and keeps speeding up. Right: the slowest closed-loop pole of PD on the pendulum against the proportional gain; it shrinks from 3 to below 0.01 per second but stays positive">
+
+Left and middle: PD ($k_p = 30$ V/rad, $k_d = 1$ V s/rad) and PID (plus $k_i = 20$ V/(rad s))
+on the pendulum's angle, in the realistic loop. Right: the linearized loop with PD, for a range
+of gains
+
+</Figure>
+
+- **PD balances the pendulum for three seconds, while the arm speeds up.** At 3.7 s the voltage
+  hits its limit, the pendulum falls, and the arm ends up spinning: 124 turns in 10 s.
+- **PID keeps the pendulum within $0.5^\circ$, and the arm still runs away**, more slowly: 3.4
+  turns in 10 s, and faster every second.
+
+The linearized loop explains both. With PD, one pole stays at $0$: the arm's angle, which the
+controller cannot see. Another pole is unstable, a slow growth of the arm's speed. Raising
+the gains shrinks it, from 3 per second down to below 0.01, but never past zero: over 3600
+pairs of gains, the best is still $+0.0007$ per second. Adding the integral does not fix it.
+The integrator's pole cancels the pendulum's zero at $s = 0$, and the loop is left with a
+*double* pole at $0$: the arm's speed grows in proportion to time, as in the simulation. No
+choice of gains changes this. It follows from what $\theta$ can see.
+
+### Two loops are state feedback
+
+The fix is to use both angles: a PD on the pendulum plus a PD on the arm,
+
+$$
+V = -\left(k_1 \alpha + k_2 (\theta - \pi) + k_3 \dot\alpha + k_4 \dot\theta\right) = -K \tilde{\mathbf x}.
+$$
+
+That is **state feedback**, with four gains that act together through the coupled dynamics.
+Tuning them one loop at a time is hard: the arm loop is non-minimum phase, and every change in
+one loop moves the poles of the other. Section 7.2 chooses all four at once, by optimization.
+
+### What we learned
+
+- Controllable is not enough: what the controller *measures* decides what it can do.
+- The pendulum's angle is blind to the arm, and the arm's angle alone is non-minimum phase
+  next to an unstable pole. Single-loop control fails for structural reasons, not tuning.
+- PD and PID on the pendulum hold it up for a while and let the arm run away, for every
+  choice of gains.
+
+## 7.2 LQR and LQG
+
+### The linear quadratic regulator
+
+The linear quadratic regulator (LQR) picks the four gains of 7.1 by minimizing a cost over the
+whole future. The voltage is held for one sample of $h = 2$ ms, so the design uses the exactly
+discretized model. Writing $\mathbf e_k$ for the deviation $\tilde{\mathbf x}$ from upright at
+sample $k$, the model is $\mathbf e_{k+1} = A_d \mathbf e_k + B_d V_k$ and the cost is
+
+$$
+J = \sum_{k=0}^{\infty} \left( \mathbf e_k^\top Q \thinspace \mathbf e_k + R \thinspace V_k^2 \right).
+$$
+
+The weights follow **Bryson's rule**: each quantity is divided by the largest value one would
+accept. Here that is $30^\circ$ for the arm, $5^\circ$ for the pendulum, 2 and 5 rad per second
+for their speeds, and 5 V, half the amplifier's limit, for the voltage. The weights then carry
+units and meaning instead of being guessed. The optimal controller is $V = -K \tilde{\mathbf x}$,
+with $P$ the solution of the discrete Riccati equation:
+
+$$
+P = Q + A_d^\top P A_d - A_d^\top P B_d \left(R + B_d^\top P B_d\right)^{-1} B_d^\top P A_d,
+\qquad
+K = \left(R + B_d^\top P B_d\right)^{-1} B_d^\top P A_d .
+$$
+
+For the identified model, $K = [{-8.8}, 110.6, {-4.6}, 8.8]$ in volts per radian and per radian
+per second. The pendulum's gain is large and positive: a lean pulls the arm underneath, as
+with the PD of 7.1. The arm's gain is **negative**, positive feedback on the arm's angle. To
+bring the arm back to zero, the controller first pushes it further away, so that the pendulum
+leans towards zero and can be followed there: the non-minimum-phase zero of 7.1, built into
+the optimal gains. In closed loop, a fast pair of poles near $-44$ and $-28$ per second holds
+the pendulum, and a slow pair at $-3.7$ per second brings the arm home.
+
+### What the estimator costs
+
+The real loop does not have the state, only the encoders. **LQG** puts the LQR behind the
+extended Kalman filter of 6.6: the filter estimates the four states from the two angles and the
+voltage it applied, and the LQR acts on the estimate. Released $5^\circ$ from upright, both
+balance:
+
+<Figure src="/media/pendulum-lab/control_lqg.png" width={100} alt="Top: the pendulum's tilt and the arm's angle after a release 5 degrees from upright, for LQR with the true state and for LQG; both bring the pendulum back within a quarter of a second, the arm first swings about 9 degrees away and returns within a second. Bottom left: the band of input gain factors for which LQG stays stable, against the filter's process noise q; it widens from 0.64 to 3.3 at small q to 0.18 to 12 at large q, approaching the band of LQR with the true state. Bottom right: the voltage noise while balancing, rising from 0.18 to 5.6 volts RMS over the same range of q">
+
+Top: LQR with the true state and LQG with the encoders, released $5^\circ$ from upright, on
+the real pendulum. Bottom: what the filter's process noise $q$ trades
+
+</Figure>
+
+Within a second both hold the pendulum to within $0.15^\circ$ and the arm to within a degree.
+What is left is a small back-and-forth caused by the dry friction and the encoder steps.
+
+The difference is in **robustness**. With the true state, LQR comes with guaranteed margins:
+in continuous time, the loop stays stable if the motor turns out anywhere from half as strong
+to infinitely strong, and with at least $60^\circ$ of phase margin. Sampled at 2 ms, the
+measured margins are close to that: any factor from 0.17 to 13.4 on the voltage, and up to
+7 samples (14 ms) of extra delay. An estimator in the loop voids that guarantee. Doyle's 1978
+paper on LQG margins has a famous one-line abstract: "There are none." For this loop, the
+**gain margins** (the range of factors on the voltage that keep the linearized loop stable)
+and **delay margin** depend on how much the filter trusts the model:
+
+| EKF process noise $q$ | gain margins | delay margin | voltage noise while balancing |
+|---|---|---|---|
+| LQR, true state | 0.17 to 13.4 | 7 samples | 0.17 V RMS |
+| LQG, $q = 10^{-5}$ | 0.64 to 3.3 | 10 samples | 0.18 V RMS |
+| LQG, $q = 0.01$ | 0.41 to 3.3 | 8 samples | 0.27 V RMS |
+| LQG, $q = 1$ | 0.25 to 4.8 | 7 samples | 0.80 V RMS |
+| LQG, $q = 1000$ | 0.18 to 12.0 | 7 samples | 5.6 V RMS |
+
+The innovation likelihood of 6.6 picks the smallest $q$, because the model is exact. Here that
+choice is fragile: a motor 36 % weaker than modelled would already destabilize the loop. A
+larger $q$ makes the filter lean on the measurements, and the margins grow back towards those
+of LQR. This is the idea of **loop transfer recovery** (Doyle and Stein), and its price is
+noise: the filter passes more encoder noise to the motor, up to 5.6 V RMS. The design here
+takes $q = 0.01$: margins from 0.41 to 3.3 at 0.27 V of noise.
+
+The estimator's model matters too. With the model of 6.4, without the friction term, the LQG
+still balances, but the arm settles $4.6^\circ$ away from zero instead of within $0.6^\circ$:
+the unmodelled friction biases the estimate. Section 7.5 removes such offsets in general.
+
+### How far can it catch?
+
+Linear analysis says nothing about large tilts, and the voltage limit is not linear at all.
+The **region of attraction**, the set of states from which the loop returns to upright, has
+to be found for the nonlinear loop. Two ways:
+
+- **A Lyapunov estimate.** The LQR's cost-to-go $\mathcal V(\tilde{\mathbf x}) = \tilde{\mathbf x}^\top P \tilde{\mathbf x}$
+  decreases at every sample of the *linear* loop. In the nonlinear loop with the voltage limit
+  it still decreases near upright. The largest level set $\mathcal V \le c$ on which it
+  decreases everywhere can then only be left downwards: every state inside it is caught. Here
+  $c$ is found by bisection, checking the decrease at 20 000 random states in the set with the
+  nonlinear model and the $\pm 10$ V limit.
+- **Simulation.** Start the real loop from a grid of states and see which return.
+
+<Figure src="/media/pendulum-lab/control_roa.png" width={85} alt="Plane of tilt from upright against tilt rate, with the arm at rest at zero. A diagonal band of starting states is caught with the 10 volt limit, reaching about 26 degrees at zero tilt rate; a wider band is caught with a 100 volt amplifier; the Lyapunov estimate is a small ellipse in the middle, reaching 7.7 degrees at zero rate. Isolated dots outside the bands are starts after which the pendulum swings once around and is caught on the next pass">
+
+States the LQR brings back to upright, with the arm at rest at zero, simulated with the true
+state on the real pendulum; the ellipse is the Lyapunov estimate in the same plane
+
+</Figure>
+
+| | from rest, tilts up to | share of the grid (tilt $\pm 40^\circ$, rate $\pm 600^\circ$ per s) |
+|---|---|---|
+| Lyapunov estimate, guaranteed | $7.7^\circ$ | |
+| simulated, $\pm 10$ V | $26^\circ$ | 54 % |
+| simulated, $\pm 100$ V amplifier | $40^\circ$ or more | 88 % |
+
+The two answers bracket the truth. The Lyapunov estimate is about three times too small, but
+it comes with a guarantee and needs no simulation of the boundary. The simulation finds the
+actual region, but only at the states it tried. The band shape shows what limits it: a lean
+can be caught if the pendulum is not already falling fast in the same direction. With an
+amplifier ten times stronger the band is much wider, so here the **voltage limit**, not the
+linearization, is what bounds the region. The isolated dots are starts after which the
+pendulum swings once around and is caught on the next pass.
+
+Two honest caveats. The check samples the set but does not prove the decrease between the
+samples; a proof would need bounds on the dynamics or sum-of-squares programming. And it holds
+for the identified model without friction; on the real pendulum, friction stops the arm short
+of zero, and the loop ends near upright rather than exactly at it. The region still matters
+for what follows: a swing-up (7.3 and 7.4) only has to bring the pendulum *into* it, and the
+LQR does the rest.
+
+### What we learned
+
+- LQR turns the four coupled gains of 7.1 into one optimization, with weights that have a
+  meaning. The optimal gains include the "wrong-way" arm feedback the non-minimum-phase zero
+  demands.
+- An estimator in the loop removes LQR's guaranteed robustness. How much is lost depends on
+  how much the filter trusts the model: margins and noise trade against each other.
+- The region of attraction is set by the voltage limit. A Lyapunov level set gives a
+  guaranteed but conservative part of it.
+
+## 7.3 Swinging up with energy
+
+The LQR catches the pendulum only within about $26^\circ$ of upright. From hanging, it has to
+get there first, and the motor cannot simply lift it (6.1): it can only move the arm and pump
+energy into the swing, as the resonance of 6.2 did open loop. This section does it with
+feedback, and with a proof.
+
+### The pendulum's energy, and the arm as the input
+
+The pendulum's own energy, without the arm's motion,
+
+$$
+E = \tfrac{1}{2} b \thinspace \dot\theta^2 + d \left(1 - \cos\theta\right),
+$$
+
+is zero hanging at rest and $E_{\mathrm{up}} = 2d$ upright at rest. Treat the arm's
+acceleration $u = \ddot\alpha$ as the input. The voltage that produces a desired $u$ follows
+from the equations of motion of 6.1: the pendulum's row gives $\ddot\theta$ for that $u$, and
+the arm's row then gives the voltage. This is **partial feedback linearization**: the arm
+becomes a pure double integrator, and the pendulum is left to respond. Its row then says how
+the energy changes:
+
+$$
+\dot E = -c \thinspace u \thinspace \dot\theta \cos\theta \thinspace - B_p \dot\theta^2 + b \sin\theta \cos\theta \thinspace \dot\alpha^2 \dot\theta .
+$$
+
+The first term is what the arm can do: accelerating the arm against the pendulum's sideways
+motion feeds energy in. The other two, the pendulum's friction and the arm's centrifugal effect,
+are small.
+
+### The control law and its proof
+
+Åström and Furuta's energy controller is
+
+$$
+u = \mathrm{sat}\left(k \left(E - E_{\mathrm{up}}\right) \dot\theta \cos\theta\right),
+$$
+
+with the saturation keeping $\lvert u \rvert \le 40$ rad per second squared. Take
+$W = \tfrac{1}{2}(E - E_{\mathrm{up}})^2$ as a Lyapunov function. Neglecting the two small terms,
+
+$$
+\dot W = (E - E_{\mathrm{up}}) \thinspace \dot E = -c \thinspace (E - E_{\mathrm{up}}) \thinspace \dot\theta \cos\theta \thinspace \mathrm{sat}\left(k (E - E_{\mathrm{up}}) \dot\theta \cos\theta\right) \le 0,
+$$
+
+because the saturation never changes the sign of its argument: **the proof survives the
+voltage limit**. $W$ stops decreasing only where $E = E_{\mathrm{up}}$ or
+$\dot\theta \cos\theta = 0$. By LaSalle's invariance principle, trajectories end in the largest
+set that stays inside these. $\dot\theta \cos\theta$ can stay zero only if the pendulum is at
+rest, so that set holds only the two equilibria and the curve $E = E_{\mathrm{up}}$. Every
+swing therefore ends on the upright energy level, the curve that leads into the upright
+position, except one: hanging exactly at rest, where $\dot\theta = 0$ and nothing happens.
+The controller gives that state a single push.
+
+The proof is honest about what it covers. It neglects the pendulum's friction and the
+centrifugal term, which make the energy overshoot by about 2 % here. It assumes the
+feedback linearization is exact, which needs the model. And it says nothing about the arm.
+
+### The arm is not in the proof
+
+<Figure src="/media/pendulum-lab/control_swingup.png" width={100} alt="Left: the pendulum's phase portrait over a full turn; starting at rest hanging, the trajectory spirals out, passes over the top a few times close to the dashed curve of the upright energy, and ends at the upright position. Middle: the pendulum's energy relative to the upright energy, rising to 1 within two seconds and staying there; the switch to LQR is marked at 4.3 seconds. Right: the arm's angle, swinging up to about 300 degrees during the swing-up and then held near 16 degrees">
+
+Swing-up from rest in the realistic loop (encoders and EKF), then LQR. Yellow: energy
+controller; blue: LQR
+
+</Figure>
+
+Run as written, the energy controller does its job, reaching 99 % of the upright energy
+within 2 s, but the arm spins away: $2394^\circ$ in 10 s. The pendulum then swings at the right
+energy, yet with the arm racing underneath it never enters the LQR's region, and the switch
+never comes. Adding a weak PD on the arm to the acceleration, $-5\alpha - 2\dot\alpha$, keeps the
+arm between $-74^\circ$ and $317^\circ$. It is not part of the proof, and it disturbs the energy
+slightly, but it makes the hand-over possible. With it, the energy reaches 76 % of the
+upright value after 1 s and 100 % after 2 s.
+
+### Handing over to the LQR
+
+When to switch from the energy controller to the LQR matters. A switch outside the LQR's
+region of attraction hands it a pendulum it cannot hold. Section 7.2 gives a rule that is
+**safe by construction**: switch when the state enters the Lyapunov region
+$\tilde{\mathbf x}^\top P \tilde{\mathbf x} \le c$, measured from wherever the arm is at that
+moment. Any arm angle is an equilibrium, so the LQR simply holds the arm there; that is why it
+ends near $16^\circ$ above. If the tilt ever exceeds $30^\circ$, the controller goes back to
+swinging.
+
+<Figure video="/media/pendulum-lab/furuta_swing_up.mp4" width={100} alt="The Furuta pendulum in an oblique 3D view swings up from rest under the energy controller, with the arm sweeping back and forth, then stands upright under the LQR; plots on the right trace the pendulum's energy rising to the upright value and the voltage, large during the swing-up and small once balancing">
+
+Swing-up and balancing in the realistic loop, at half speed
+
+</Figure>
+
+In the realistic loop, from rest, the switch comes at 4.3 s, after which the pendulum stays
+within $0.3^\circ$ of upright. A common alternative is a heuristic: switch when the tilt is small,
+whatever the speeds. Over 100 random starting states near hanging, with the true state:
+
+| hand-over | balanced after 10 s | median time to the switch | the LQR lost the pendulum |
+|---|---|---|---|
+| Lyapunov region (guaranteed) | 100 % | 2.9 s | never |
+| tilt below $20^\circ$ | 100 % | 1.7 s | 2 of 100 times |
+| tilt below $10^\circ$ | 100 % | 2.8 s | never |
+
+The heuristic is faster: it switches while the pendulum is still rising. But twice it handed
+over a pendulum moving too fast, the LQR lost it, and the swing-up had to start again. The
+Lyapunov rule waits about a second longer and never fails. The tighter cone of $10^\circ$
+happens to work as well here, but nothing guarantees that it will on another pendulum.
+Guarantees cost a little performance; they buy predictability, which matters most when the
+controller cannot be tested in every situation.
+
+### What we learned
+
+- Energy shaping turns the swing-up into a one-dimensional problem with a Lyapunov proof that
+  survives the input limit.
+- A proof covers what it models. Here it covers the pendulum's energy, not the arm, and the
+  arm needed a term of its own.
+- A hand-over rule based on the region of attraction is slower than a heuristic but never hands
+  the LQR a state it cannot catch.
+
+## 7.4 Trajectory optimization and time-varying LQR
+
+The energy controller of 7.3 is simple and robust, but slow: it pumps a little energy per
+swing and takes over 4 s. Underactuated robots in practice are often controlled differently:
+compute the best possible motion **offline**, then **track** it online with a feedback controller
+that changes along the way. The code is in
+`src/pendulum_lab/furuta_trajectory.py`.
+
+### An optimal swing-up, computed offline
+
+The swing-up is cut into 100 intervals of 20 ms. The unknowns are the voltage held over each
+interval, $u_0, \dots, u_{99}$, and the state at the start of each, $\mathbf x_0, \dots, \mathbf x_{100}$.
+The optimization minimizes the voltage effort subject to:
+
+- **the model:** each state must equal one simulated interval from the previous one,
+  $\mathbf x_{k+1} = \Phi(\mathbf x_k, u_k)$, simulated with the identified model;
+- **the limits:** $\lvert u_k \rvert \le 8$ V, keeping 2 V of the amplifier for the feedback;
+- **the ends:** at rest hanging at $t = 0$, at rest upright at $t = 2$ s, with the arm at any angle.
+
+$$
+\min_{u, \thinspace \mathbf x} \thinspace \sum_{k=0}^{99} u_k^2 \thinspace \Delta t
+\qquad \text{subject to} \qquad
+\mathbf x_{k+1} = \Phi(\mathbf x_k, u_k), \quad \lvert u_k \rvert \le 8,
+$$
+
+with the start and end states fixed as above. Keeping every state as an unknown (**multiple
+shooting**) instead of only the voltages matters for an unstable system: simulating 2 s at a
+time, as in 6.4, makes the end state extremely sensitive to the early voltages, while here every
+constraint spans only 20 ms. All 100 intervals are simulated as one batch, so the Jacobian of the
+constraints costs five simulations. Dry friction is left out of the optimization model, as in the
+linearization of 7.1; the feedback will handle it.
+
+SciPy's SLSQP solver stops at its limit of 1000 iterations, after about 2 minutes, with the
+dynamics met to $2 \cdot 10^{-4}$ rad and the effort still creeping down: the trajectory is
+**feasible, but not certified optimal**. It swings the pendulum back and forth a few times and brings it
+up in 2 s, with at most 5.9 V, well inside the 8 V allowed.
+
+### Open loop fails, even on the model
+
+Played open loop, the planned voltages miss badly: the pendulum ends $71^\circ$ from upright and
+falls, on the real pendulum and **even on the model the plan was made for**. The tiny remaining
+defects of the optimization and the difference between its 20 ms steps and the controller's 2 ms
+steps are enough. Near the top, small errors double every 54 ms (7.1).
+
+<Figure src="/media/pendulum-lab/control_trajectory.png" width={100} alt="Left: the pendulum angle over 3 s for the plan, for the planned voltages played open loop, and for tracking with TVLQR; the plan and TVLQR coincide and reach 180 degrees at 1.5 seconds, open loop separates after one second and never reaches the top. Middle: the arm; open loop ends spinning, TVLQR follows the plan to about 190 degrees. Right: the planned voltage, a staircase of 20 millisecond steps within 6 volts, and the voltage TVLQR applies, nearly the same">
+
+The optimized swing-up on the real pendulum: the plan, its voltages played open loop, and
+tracking by TVLQR, followed by the LQR of 7.2 at the top (after the dotted line)
+
+</Figure>
+
+### Tracking with a time-varying LQR
+
+Along the trajectory, the deviation $\delta \mathbf x_k = \mathbf x_k - \mathbf x_k^{\ast}$ evolves,
+to first order, as $\delta \mathbf x_{k+1} = A_k \delta \mathbf x_k + B_k \delta u_k$, with
+$A_k$ and $B_k$ the model linearized at the planned state. The LQR of 7.2, with the same weights,
+can be computed for this time-varying system too: the Riccati recursion is run **backwards in
+time**, from the end of the trajectory to its start,
+
+$$
+K_k = \left(R + B_k^\top P_{k+1} B_k\right)^{-1} B_k^\top P_{k+1} A_k,
+\qquad
+P_k = Q + A_k^\top P_{k+1} \left(A_k - B_k K_k\right),
+$$
+
+starting from the $P$ of the infinite-horizon LQR at the top. The gains therefore blend into the
+balancing controller at the end of the swing. Online, the controller is
+$V_k = u_k^{\ast} - K_k \thinspace \delta\mathbf x_k$: one table lookup and one matrix-vector
+product per sample. All 1000 gains are computed in 0.3 s.
+
+On the real pendulum, friction included, TVLQR stays within $0.2^\circ$ of the planned pendulum
+angle and $1.2^\circ$ of the planned arm angle, and the pendulum stays upright from 1.4 s on,
+using at most 6.2 V. With the encoders and the EKF of 6.6 instead of the true state, the
+result is the same to within a tenth of a degree. That is **three times faster** than the energy
+controller (4.6 s from rest to balanced).
+
+### The weak spot: time
+
+TVLQR compares the state with where the plan was *at this time*. A pendulum pushed behind
+schedule is pulled back towards a plan that may no longer be reachable within the voltage limit.
+To test this, the pendulum gets a push, a sudden change of its angular speed $\dot\theta$
+between $-8$ and $+8$ rad per second, at one of ten moments during the swing:
+
+<Figure src="/media/pendulum-lab/control_push.png" width={100} alt="Three maps of the time until balanced, against the time of the push and its size. TVLQR balances quickly in most cells but fails, marked with crosses, for the largest pushes after 1.2 seconds and for medium and large positive pushes at 0.8 seconds. The energy controller balances in every cell, typically after 3 to 4 seconds. The hybrid balances in every cell, quickly where TVLQR succeeds and more slowly, up to 7 seconds, where it had to fall back">
+
+Time until the pendulum stays within $2^\circ$ of upright after a push, for 120 combinations
+of push time and size. Crosses: never balanced within 10 s
+
+</Figure>
+
+| 120 pushes | balanced | median time to balanced | worst |
+|---|---|---|---|
+| TVLQR | 88 % | 1.5 s | 2.4 s |
+| energy controller (7.3) | 100 % | 3.4 s | 5.9 s |
+| hybrid: TVLQR, falling back to the energy controller | 100 % | 1.8 s | 7.0 s |
+
+TVLQR fails on 15 of the 120 pushes, mostly the largest ones late in the swing. The energy
+controller recovers from all of them, because it depends only on the current state, never on
+the clock; it is just slower. The **hybrid** combines the two: it tracks the plan while the
+pendulum stays within $15^\circ$ of it, and otherwise (or if the tilt exceeds $30^\circ$ after
+the swing) hands over to the energy controller of 7.3 for good. It is nearly as fast as TVLQR
+and as robust as the energy controller.
+
+<Figure video="/media/pendulum-lab/furuta_hybrid_push.mp4" width={100} alt="The Furuta pendulum swings up along the optimal plan, shown as a faint ghost; at 1.2 seconds a push knocks it off the plan, the energy controller takes over and swings it up again, and the LQR balances it at the top. Plots trace the tilt against the plan and the voltage">
+
+The hybrid with a push of $+8$ rad per second at 1.2 s, which TVLQR alone does not survive.
+True state, at half speed
+
+</Figure>
+
+### Funnels and orbits
+
+The push map is a simulated slice of what the literature calls a **funnel**: the set of states
+around the trajectory from which tracking still succeeds, shrinking or widening along the way.
+**LQR-trees** (Tedrake and colleagues) compute such funnels with time-varying Lyapunov functions
+and sum-of-squares programming, and cover the state space with a tree of trajectories whose
+funnels overlap, each leading into the next and finally into the LQR's region at the top. That is
+the guaranteed version of the hybrid above.
+
+The time-indexing problem itself can also be removed: instead of a schedule, stabilize the
+**path**. Transverse linearization and virtual holonomic constraints (Shiriaev and colleagues,
+developed in part at NTNU) control only the deviation across the planned orbit and let the
+motion along it proceed at its own pace. A pushed pendulum is then not behind schedule; it is
+simply further along or further back on the same path. Both are beyond this section, but they
+are where the ideas here lead.
+
+### What we learned
+
+- An optimal trajectory is cheap to use online and fast, but useless open loop: the unstable
+  dynamics amplify every small mismatch, even with the model the plan was made for.
+- TVLQR turns the plan into a controller by running the LQR's Riccati recursion backwards along it,
+  ending in the balancing LQR.
+- Indexing by time is its weak spot. A state-based fallback removes it: the hybrid of an optimal
+  plan and the energy controller is fast when nothing goes wrong and never stuck when something does.
+
+## 7.5 Robustness and adaptation
+
+Everything so far ran on a pendulum close to the identified model. Real systems drift from
+their models: signals arrive late, amplifiers have offsets, payloads get attached. This
+section tests the LQG of 7.2 (with $q = 0.01$) against three such changes it does not know
+about, then adds the two classical remedies: a **disturbance observer** and **adaptation**.
+
+### How much the LQG tolerates
+
+Released $5^\circ$ from upright, with each change applied separately:
+
+| change the controller does not know about | LQG | LQG with disturbance observer |
+|---|---|---|
+| none | tilt within $0.13^\circ$, arm at $0.0^\circ$ | tilt within $0.18^\circ$, arm at $0.0^\circ$ |
+| input delay of 16 ms (8 samples) | tilt within $0.25^\circ$ | |
+| input delay of 20 ms (10 samples) | falls | |
+| amplifier offset of 0.2, 0.5, 1 V | arm settles $3.7^\circ$, $10.6^\circ$, $21.5^\circ$ off | arm settles at $0.0^\circ$ |
+| payload of 50 g at the tip, attached at 3 s | balances | balances |
+| payload of 100 g or 200 g | falls | balances, tilt within $0.3^\circ$ |
+
+The delay margin found in 7.2 for the linearized loop, 8 samples, holds for the nonlinear one:
+8 samples are tolerated, 10 are not. A payload of 50 g, twice the pendulum's own mass, still
+balances. The **amplifier offset** is the weak spot: a constant voltage error leaves a constant
+error in the arm's angle, $2^\circ$ for every 0.1 V, because nothing in the LQG integrates.
+
+### A disturbance observer
+
+The classical fix is integral action. A model-based way to get it is to let the EKF estimate
+the disturbance: append an unknown voltage offset $w$ to the state, modelled as a slow random
+walk, as the parameters of 5.6 were, and let the controller cancel it,
+
+$$
+V = -K \hat{\mathbf x} - \hat w .
+$$
+
+The filter now explains any persistent mismatch between the predicted and measured motion as a
+voltage, and the controller removes it. With offsets up to 1 V, the arm returns to $0.0^\circ$:
+
+<Figure src="/media/pendulum-lab/control_robust.png" width={100} alt="Left: the arm angle while balancing with a 0.5 volt amplifier offset; the plain LQG settles about 10 degrees off zero and keeps swinging, the LQG with a disturbance observer returns to zero within a second and stays within a degree of it. Middle: the payload estimated from the encoders during the swing-up, for 20, 50 and 100 grams; each estimate lands on the true value within about a quarter of a second. Right: the payload estimated while balancing, with 100 grams attached at 3 seconds; neither estimator finds it, both stay near zero">
+
+Left: balancing with a 0.5 V amplifier offset. Middle and right: estimating a payload at the
+pendulum's tip online, from the encoders
+
+</Figure>
+
+The observer does more than remove offsets. With it, the LQG also balances payloads of 100 and
+200 g, which bring down the plain LQG. A heavier pendulum needs a different torque to be held
+up, and the estimated "voltage offset" supplies it. A disturbance observer lumps every
+mismatch between model and plant into one signal and cancels it, which is why it is popular in
+industry. Two caveats: it only cancels what its signal can represent, here a torque at the motor;
+and with dry friction, the arm now hunts back and forth by about a degree around zero instead of
+sticking slightly off it.
+
+### Adaptation: estimating the payload
+
+A disturbance observer compensates without knowing *why*. **Adaptation** estimates what has
+changed. Here that is natural: a payload of unknown mass $m$ at the tip, with known geometry,
+changes the lumped parameters in a known way ($b$ grows by $m L_p^2$, $d$ by $m g L_p$, and so
+on). Appended to the EKF's state, with one physical constraint, $m \ge 0$, a single unknown
+replaces the six lumped parameters of 6.4. Without that bound, the estimate of a payload that is
+not there wanders below zero, the model's pendulum gets a negative inertia, and the filter
+diverges.
+
+Whether the mass can be estimated depends entirely on the motion:
+
+- **During the swing-up**, from the encoders alone, the estimate lands within about 1 g of the
+  truth in half a second: 21, 51 and 100 g for payloads of 20, 50 and 100 g. The swing excites
+  everything the mass affects.
+- **While balancing**, 100 g attached at 3 s is never found: the estimate stays near zero, with
+  brief spikes of up to about 15 g. The pendulum moves about $0.1^\circ$, two counts of the encoder, which carries no
+  information about its mass. The variant that also estimates an offset is worse: during the
+  first recovery from $5^\circ$, before anything was attached, it jumps to 95 g and then decays.
+  The transient was misread as a payload.
+
+This is the old lesson of 6.3 in an online form: **parameters need excitation**. A controller
+that does its job well keeps the system still and thereby stops learning about it. Adaptive
+control resolves this tension with probing signals or with dual control, which deliberately
+excites the system when its uncertainty matters. Here, during balancing, the disturbance observer
+makes adaptation unnecessary.
+
+Where adaptation would matter is the swing-up: the energy target $2d$ depends on the payload.
+Even with the payload known to within 1 g, though, the energy controller tuned in 7.3 does not
+bring a pendulum with 50 or 100 g up: it needs more torque than the $\pm 10$ V allow, the voltage
+sits at its limit, and the arm races. Knowing the new model is not enough when the plan made for
+the old one is no longer feasible. The swing-up has to be **re-planned within the limits**,
+which is exactly what model predictive control does online (7.6 and 7.7).
+
+### What we learned
+
+- The LQG tolerates 16 ms of delay and payloads of twice the pendulum's mass, but not a constant
+  offset: without integration, a constant disturbance leaves a constant error.
+- A disturbance observer adds integral action from the model and, as a side effect, absorbs a
+  wide range of model errors.
+- Online estimation of a physical parameter works when the motion excites it and fails when it
+  does not. A well-balanced pendulum is a bad experiment.
+
+## 7.6 Constrained MPC with stability guarantees
+
+The LQR treats the $\pm 10$ V limit as an afterthought: it computes a voltage and the amplifier
+clips it. It cannot respect a limit on a state at all. A real arm may have one: a cable, an end
+stop, a neighbouring robot. **Model predictive control** (MPC) puts the limits into the design.
+At every step it plans the next inputs by optimization, subject to the model and every limit,
+applies the first one, and plans again at the next step. The code is in
+`src/pendulum_lab/furuta_mpc.py`.
+
+### The problem solved at every step
+
+Every 10 ms, starting from the current deviation $\mathbf e_0$ from upright, the MPC plans
+40 voltages ($0.4$ s ahead) with the linearized model of 7.1, discretized at 10 ms:
+
+$$
+\min_{u_0, \dots, u_{39}} \thinspace \sum_{k=0}^{39} \left(\mathbf e_k^\top Q \thinspace \mathbf e_k + R \thinspace u_k^2\right) + \mathbf e_{40}^\top P \thinspace \mathbf e_{40}
+$$
+
+subject to $\mathbf e_{k+1} = A_d \mathbf e_k + B_d u_k$, $\lvert u_k \rvert \le 10$ V,
+$\lvert \alpha_k \rvert \le 12^\circ$ for the arm, and $\mathbf e_{40} \in \mathcal X_f$. The weights
+$Q$ and $R$ are those of the LQR in 7.2. Two ingredients make the result **stable by
+construction** (Mayne and colleagues, 2000):
+
+- **Terminal cost.** $P$ is the cost-to-go of the infinite-horizon LQR: the plan is scored as if
+  the LQR took over after 40 steps.
+- **Terminal set.** $\mathcal X_f$ is the largest set of states from which the LQR alone never
+  violates a limit, the *maximal admissible set* of Gilbert and Tan. It is computed once,
+  offline: start from the limits, add the conditions that they still hold one step later under
+  the LQR, and so on, until a linear program shows that the next step adds nothing. Here that
+  takes 188 inequalities and 0.2 s.
+
+If the problem can be solved once, the shifted plan, with the LQR's input appended at the end,
+is a solution at the next step: the MPC is **recursively feasible**, and its optimal cost
+decreases from step to step like a Lyapunov function. Inside the set of states from which the
+problem has a solution, the loop is stable and every limit is met, for the linear model.
+
+All predicted states are linear in the 40 voltages, so the problem is a **quadratic program**
+in 40 unknowns with about 300 linear constraints. It is solved by a primal-dual interior-point
+method with Mehrotra's predictor-corrector steps, written out in NumPy: 6 to 12 iterations,
+about 2 ms per step in Python, well within the 10 ms between updates. A first attempt with ADMM,
+the method of the popular OSQP solver, needed hundreds of iterations whenever several
+constraints were active, which is exactly when the MPC matters.
+
+### Limits respected where they can be
+
+<Figure src="/media/pendulum-lab/control_mpc.png" width={100} alt="Left: the arm angle after a release 8 degrees from upright with the arm limited to 12 degrees; the LQR swings the arm to 15 degrees, the MPC holds it near the 12 degree limit for about a third of a second and then brings it back to zero like the LQR. Middle: the voltages; both use the full 10 volts at first, the MPC with a few short corrections while it rides the limit. Right: in the plane of tilt and tilt rate, the band of states from which the MPC's guarantees hold, identical for horizons of 10, 20 and 40 steps, and the narrower band of the terminal set">
+
+Left and middle: LQR and MPC released $8^\circ$ from upright, true state, real pendulum. Right:
+states (with the arm at rest at zero) from which the MPC problem can be solved with every
+limit met
+
+</Figure>
+
+| released from rest at | largest arm angle, LQR | largest arm angle, MPC |
+|---|---|---|
+| $4^\circ$ | $7.2^\circ$ | $7.0^\circ$ |
+| $8^\circ$ | $15.0^\circ$ | $12.8^\circ$ |
+| $10^\circ$ | $19.7^\circ$ | $16.6^\circ$ |
+
+From rest, the $12^\circ$ arm limit can be met for tilts up to $8^\circ$; beyond that, no
+voltage within $\pm 10$ V can catch the pendulum without the arm swinging further, because the
+arm has to move out before it can come back (the non-minimum-phase zero of 7.1). From $8^\circ$,
+the MPC rides the limit for a third of a second, then returns the arm to zero. It ends $0.8^\circ$
+past the limit, and the next paragraphs explain why. LQR, which knows nothing about the limit,
+swings out to $15^\circ$.
+
+The region of guaranteed states (right) does **not** grow with the horizon: 10, 20 and 40 steps
+all cover 45 % of the slice, against 35 % for the terminal set alone. What limits it is physical:
+from outside it, no input sequence at all meets the limits. Predicting further does not change
+that.
+
+### What the guarantee does not cover
+
+The guarantees hold for the linear model, from states where the problem has a solution. The real
+loop leaves that world in three ways, and each showed up while building this section:
+
+- **Model mismatch at the boundary.** The plan from $8^\circ$ touches the arm limit exactly. On
+  the real pendulum, friction, nonlinearity and the 10 ms hold carried the arm $0.07^\circ$ past
+  it, and from there the problem had no solution. The limits on states are therefore
+  **softened**: a slack variable may relax them, at a price. With an exact (linear) price, the
+  controller became nearly bang-bang at the boundary and chattered between $+5$ and $-5$ V at the
+  update rate, pinning the arm at the limit. With a quadratic price it behaves smoothly, at the
+  cost of the $0.8^\circ$ violation above. The systematic fix is to plan against tightened limits
+  that leave room for the mismatch: **tube MPC**.
+- **Infeasible starts.** From $10^\circ$ the arm limit cannot be met. The softened MPC keeps the
+  violation smaller than the LQR, but then it parks the arm near $17^\circ$ instead of bringing it
+  back: returning would mean swinging further out first, which the penalty forbids within a
+  $0.4$ s horizon.
+- **The estimate.** Behind an EKF that starts from the measured angles, the MPC keeps the arm at
+  $12.9^\circ$ from $8^\circ$, against $15.2^\circ$ for LQG. Behind an EKF that wrongly starts out
+  believing the pendulum upright, the MPC is *worse* than LQG ($18.0^\circ$ against $13.9^\circ$):
+  it plans confidently against limits it measures with a wrong state.
+
+Constraint handling is only as good as the model and the state it relies on. Section 7.8 adds a
+layer that enforces limits on any controller, learned ones included.
+
+### What we learned
+
+- MPC respects input and state limits by planning within them, instead of clipping afterwards.
+- A terminal cost and a terminal set, both taken from the LQR, make it recursively feasible and
+  stable, inside the set of states from which the limits can be met at all.
+- Outside the theory's assumptions, the details of softening, solving and estimating decide the
+  behaviour: a guarantee is a statement about a model, not about the machine.
+
+## 7.7 Nonlinear MPC
+
+Section 7.4 planned a swing-up offline and tracked it; its weak spot was the clock. Section 7.6
+planned online, but only near the top, with a linear model. **Nonlinear MPC** combines the two:
+plan the whole motion online, with the full nonlinear model, again at every control step. Then
+there is no schedule to fall behind, and no switch between a swing-up and a balancing
+controller: one controller does both. The code is in
+`src/pendulum_lab/furuta_nmpc.py`.
+
+### The real-time iteration
+
+The plan covers the next $1.5$ s in 75 intervals of 20 ms, with the identified model, by
+multiple shooting as in 7.4: the states at the interval boundaries and the voltages are the
+unknowns. The cost penalizes the pendulum's distance from upright as a point on the unit circle,
+$\sin^2\theta + (1 + \cos\theta)^2 = 2 + 2\cos\theta$, so that it may come up either way round,
+plus small terms for the arm, the speeds and the voltage, with the voltage limited to 8 V.
+
+Solving this nonlinear problem to convergence at every step would take far too long. The
+**real-time iteration** (Diehl and colleagues) does a single Gauss–Newton step per control step:
+
+1. set the first state of the plan to the measured state;
+2. linearize the dynamics and the cost along the previous plan;
+3. solve the resulting quadratic program for corrections to the voltages;
+4. apply the first voltage, shift the plan by one interval, and repeat 20 ms later.
+
+The state hardly changes between steps, so one iteration per step keeps the plan close to the
+optimum, the way the EKF of chapter 5 tracks a moving state with one correction per sample.
+
+Two practical details decided whether this worked at all:
+
+- **Pre-stabilization.** The first version could not hold the pendulum up. Near the top, the
+  plan's later states depend on its first voltages through the unstable dynamics, amplified
+  about $e^{13 \times 1.5} \approx 10^8$ times over the horizon, and the quadratic program built
+  from those sensitivities is numerically meaningless. The fix is to plan the corrections
+  relative to a feedback law, $\delta u_k = -K_k \thinspace \delta \mathbf x_k + \delta v_k$, with
+  $K_k$ a time-varying LQR along the current plan (7.4's Riccati recursion, now run at every
+  step). The corrections $\delta v_k$ then act on a stabilized system, and the sensitivities stay
+  bounded.
+- **A fallback.** A large push can make the linearization blow up. The plan is then discarded and
+  started again from the measured state, as from a cold start.
+
+One step takes about 10 ms in Python, half of the 20 ms between steps.
+
+### One controller from hanging to upright
+
+<Figure src="/media/pendulum-lab/control_nmpc.png" width={100} alt="Left: tilt from upright over 4 seconds for three runs; started at rest with the offline plan as first guess, and started 5 and 30 degrees from hanging without any plan; all three swing the pendulum over the top a few times and settle upright within about 2.2 seconds. Middle: the arm angle, which stays within about 40 degrees and then drifts slowly by about 10 degrees. Right: a map of the time until balanced after the 120 pushes of section 7.4, balanced everywhere, mostly within 1 to 2 seconds">
+
+Left and middle: the same nonlinear MPC swinging up and balancing, with and without a plan as
+its first guess. Right: the time until balanced after the pushes of 7.4
+
+</Figure>
+
+| start | first guess | balanced from | arm range |
+|---|---|---|---|
+| at rest, hanging | the offline plan of 7.4 | 1.5 s | $-24^\circ$ to $38^\circ$ |
+| at rest, hanging | none | never: the controller does not move | |
+| $5^\circ$ from hanging | none | 2.2 s | $-20^\circ$ to $29^\circ$ |
+| $30^\circ$ from hanging | none | 2.0 s | $-21^\circ$ to $23^\circ$ |
+
+Without any plan, from a slightly disturbed start, the nonlinear MPC finds a swing-up by itself
+within about 2 s. Exactly at rest it does nothing: the cost is flat there (the gradient of
+$\cos\theta$ vanishes at the bottom), so a single Gauss–Newton step sees no reason to move. A
+plan as first guess, or the slightest disturbance, is enough. Behind the EKF instead of the
+true state, with the plan as first guess, it is balanced from 1.5 s as well. Once up, the arm
+creeps back to zero only slowly, because its speed is penalized to keep it from spinning.
+
+A surprise: **a shorter horizon swings up faster**. From $5^\circ$ without a plan, the pendulum is
+balanced after 1.2 s with a horizon of $0.5$ s, 1.5 s with 1 s, 2.2 s with $1.5$ s and 2.6 s
+with 2 s. A long horizon lets the optimizer spread the swing over more time and save voltage; a
+short one has to get the pendulum up within it to stop paying for being down. The horizon is
+part of the design, not just a question of accuracy.
+
+### Pushes, again
+
+| 120 pushes (7.4) | balanced | median time to balanced | worst |
+|---|---|---|---|
+| TVLQR (7.4) | 88 % | 1.5 s | 2.4 s |
+| energy controller (7.3) | 100 % | 3.4 s | 5.9 s |
+| hybrid of the two (7.4) | 100 % | 1.8 s | 7.0 s |
+| nonlinear MPC | 100 % | 1.6 s | 5.3 s |
+
+The nonlinear MPC balances after every push, nearly as fast as TVLQR when nothing goes wrong and
+faster than the hybrid when something does: it never follows a clock, it re-plans from wherever
+the pendulum is. The price is computation: 10 ms of optimization per step instead of a table
+lookup, and a guarantee that is weaker than in 7.6. Nothing here proves that the real-time
+iteration converges or that the closed loop is stable; the evidence is the simulations.
+
+### What we learned
+
+- Re-planning online with the nonlinear model removes the time-indexing problem of 7.4 and the
+  switching of 7.3: one controller swings up, balances and recovers from pushes.
+- On an unstable system, the way the optimization problem is written matters as much as the
+  model: without pre-stabilization, the condensed problem is numerically useless.
+- The horizon trades effort against speed, and a cost that is flat somewhere leaves the
+  controller without a direction there.
+
+## 7.8 Safety filters
+
+Every controller so far was designed by hand and analysed. Chapter 8 will learn controllers
+from data, and a learning controller explores: early on it does almost anything. A
+**safety filter** sits between any controller and the motor, lets its voltage through when it
+is safe, and changes it as little as possible when it is not. The controller can then be
+anything; the limits are the filter's job. The code is in
+`src/pendulum_lab/furuta_safety.py`.
+
+### A barrier function for the arm
+
+A **control barrier function** (Ames and colleagues) is a function $h(\mathbf x)$ that is
+positive on the safe set, with a condition on the input that keeps it from crossing zero. For an
+arm limited to $\pm \alpha_{\max}$, take $h = \alpha_{\max} - \alpha$ (and $\alpha_{\max} + \alpha$
+for the other side). The voltage reaches $\alpha$ only through its acceleration, which is affine
+in it, $\ddot\alpha = f(\mathbf x) + g(\mathbf x) V$. Two nested conditions keep $h$ positive:
+
+$$
+\psi = \dot h + \lambda_1 h \ge 0,
+\qquad
+\dot\psi + \lambda_2 \thinspace \psi \ge 0 .
+$$
+
+The first one lets the arm approach the limit only ever more slowly; the second one, which
+contains $\ddot\alpha$ and therefore $V$, keeps the first one true. Each side gives one bound on
+$V$, so the filter's quadratic program, the voltage closest to the proposed one that meets both,
+has a closed form: clip the proposal to an interval. It is evaluated at every 2 ms sample.
+
+<Figure src="/media/pendulum-lab/control_safety.png" width={100} alt="Left: the arm angle under a random voltage policy for 20 seconds; without a filter the arm leaves the plot within two seconds and turns thousands of degrees, behind the barrier function it stays between minus 45 and plus 45 degrees. Middle: the arm under an exploring balancing controller with the arm limited to 15 degrees; with the barrier function the pendulum falls at about 5 seconds, marked with a cross; with the predictive filter the arm reaches the limit and stays there. Right: the tilt from upright in the same runs; the barrier function's run falls over at 5 seconds, the predictive filter's stays within a tenth of a degree">
+
+Left: a random policy, with and without a barrier function on the arm. Middle and right: a
+balancing controller plus random noise, with the arm limited to $15^\circ$
+
+</Figure>
+
+**A random policy** (a random voltage every 50 ms, an agent that has learned nothing) spins the
+arm by $3500^\circ$ to $9800^\circ$ in 20 s. Behind a barrier function with a $45^\circ$ limit:
+
+| random policy, 3 runs of 20 s | largest arm angle | voltage changed |
+|---|---|---|
+| no filter | $3460^\circ$ to $9776^\circ$ | |
+| barrier, gentle ($\lambda_1 = 5$, $\lambda_2 = 20$) | $36^\circ$ to $41^\circ$ | at 64 to 69 % of the samples |
+| barrier, sharp ($\lambda_1 = 20$, $\lambda_2 = 50$) | $45^\circ$ to $49^\circ$ | at 28 to 34 % of the samples |
+
+The gains trade caution against freedom. The gentle barrier slows the arm far from the limit and
+corrects two thirds of the time; the sharp one lets the arm run almost to the limit and corrects a
+third of the time, but in one run it overshoots by $4^\circ$: the conditions hold in continuous
+time, and with 2 ms samples and a held voltage, large gains let the discretization through.
+
+**The energy swing-up** of 7.3 swings the arm to $300^\circ$ on its own. Behind a sharp barrier
+at $45^\circ$, it stays within $42^\circ$ and still swings up, and sooner: the switch to LQR comes
+at 1.9 s instead of 4.3 s, because the barrier stops the arm from running away underneath the
+pendulum.
+
+### When the barrier is not enough
+
+Balancing is different. The pendulum needs the arm to move, and a barrier on the arm alone does
+not know that. With the arm limited to $15^\circ$ while balancing:
+
+| balancing, arm limited to $15^\circ$ | no filter | barrier function | predictive filter |
+|---|---|---|---|
+| push of $1\ \text{rad/s}$ | $10.2^\circ$, up | $10.2^\circ$, up | $9.8^\circ$, up |
+| push of $2\ \text{rad/s}$ | $20.5^\circ$, up | $15.0^\circ$, **falls** | $16.2^\circ$, up |
+| push of $3\ \text{rad/s}$ | $31.8^\circ$, up | $15.0^\circ$, **falls** | $27.6^\circ$, up |
+| exploring balancer, 3 runs | up to $18.4^\circ$, up | up to $15.0^\circ$, **falls twice** | up to $15.0^\circ$, up |
+
+The barrier keeps the arm inside the limit and lets the pendulum fall: near the limit it forbids
+exactly the arm motion that balancing needs. The gentle barrier drops the pendulum even after a
+push of $1\ \text{rad/s}$, where the arm would never have reached the limit. The barrier is **myopic**: it
+protects the arm's limit one step at a time, and so it can lead the system into states from which
+balancing within the limit is impossible.
+
+### A filter that looks ahead
+
+The **predictive safety filter** (Wabersich and Zeilinger) fixes this with the machinery of 7.6.
+At every 10 ms it solves the MPC's quadratic program with a different objective: the first
+voltage as close as possible to the proposed one, subject to the existence of a *whole plan*
+that meets every limit and ends in the terminal set, where the LQR can take over for good. It
+never steps into a state from which the limits can no longer be kept, because then no such plan
+would exist. Two details mattered:
+
+- Violations of the softened limits must be priced far above any change of the voltage.
+  Priced as in 7.6, the filter preferred to let the arm through rather than correct the voltage.
+- The plan uses the linear 10 ms model; the real arm overshot the planned limit by up to
+  $1.3^\circ$. The filter therefore plans against $13.5^\circ$ to protect $15^\circ$: the
+  tightening of 7.6.
+
+With that, the exploring balancer stays up in all three runs, with the arm at most $15.0^\circ$.
+After pushes of 2 and $3\ \text{rad/s}$ it keeps the pendulum up too, but the arm goes past the limit:
+from those states, as the exact feasibility check shows, no plan exists any more (only pushes
+up to $1.5$ rad/s leave one), and the softened limit gives way rather than the pendulum. And it
+has the weakness of 7.6: in the middle panel the arm reaches the limit and stays there, because
+coming back would mean first moving further out.
+
+### What we learned
+
+- A safety filter separates *what a controller wants* from *what is allowed*: any controller,
+  learned ones included, can be made to respect limits, with minimal changes.
+- A barrier function on one variable is simple and fast, but myopic. On an underactuated system
+  it can keep the limit while destroying the task.
+- A predictive filter keeps the system where a safe continuation still exists. Its guarantees
+  are those of the model it plans with, so it needs the same margins as MPC.
+
+## Chapter summary
+
+The [controller gallery](/projects/pendulum-lab/controller-gallery/) shows every controller of this chapter, and those of
+chapter 8, side by side on the same pendulum.
+
+The chapter took the identified model of chapter 6 and built controllers for the real pendulum,
+always tested through the encoders, the held and limited voltage, and the friction the models
+do not fully know:
+
+| | controller | what it showed |
+|---|---|---|
+| 7.1 | PID on the pendulum | single-loop control fails for structural reasons: the pendulum is blind to the arm |
+| 7.2 | LQR and LQG | optimal gains; the estimator removes the guaranteed margins; a Lyapunov region of attraction |
+| 7.3 | energy-based swing-up | a Lyapunov proof that survives the voltage limit, and a hand-over that is safe by construction |
+| 7.4 | trajectory optimization and TVLQR | 3 times faster than energy control; time indexing is the weak spot; a hybrid fixes it |
+| 7.5 | disturbance observer, adaptation | offset-free control; parameters can be learned only when the motion excites them |
+| 7.6 | constrained MPC | limits respected by planning; stability guaranteed where the limits can be met at all |
+| 7.7 | nonlinear MPC | one controller for swing-up, balance and pushes, without a schedule |
+| 7.8 | safety filters | limits for any controller; a filter that looks ahead keeps the task and the limit |
+
+Three threads run through it:
+
+- **Guarantees are statements about models.** Lyapunov regions, terminal sets and barrier
+  functions hold for the model they are computed with. On the real loop, friction, sampling and
+  estimation errors erode them, and margins, tightening and fallbacks are what make them
+  usable.
+- **Underactuation shapes everything.** The non-minimum-phase arm appeared in every section: in
+  the wrong-way LQR gain, in the MPC and the predictive filter that park at a limit, in the
+  barrier that drops the pendulum.
+- **Structure beats raw computation, until it does not.** The energy controller is a one-line
+  law with a proof; nonlinear MPC needs 10 ms of optimization per step but handles everything at
+  once. The hybrid of 7.4 and the predictive filter combine a cheap structure with a safety net.
+
+### From the pendulum to underwater manipulation
+
+An underwater manipulator meets the same problems at a larger scale. The arm's coupling to the
+pendulum is the coupling between a vehicle and its arm; the friction that the model of 6.4 missed
+is the hydrodynamic drag and added mass that no model gets exactly right; the pushes are currents
+and contact; the arm limit is a joint limit, a tether or the clearance to a structure. A learned
+controller for such a system is only acceptable with a layer like that of 7.8 underneath it,
+which is where chapter 8 starts.
+
+**Next:** chapter 8 · hybrid learning and control.

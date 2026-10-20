@@ -31,7 +31,7 @@ const num = String(number).padStart(2, '0');
 <Base title={`${num} · ${title} · ${project.data.title}`} description={summary}>
   <article class="chapter-page container">
     <header class="chapter-head">
-      <p class="eyebrow eyebrow--accent"><a href={`/projects/${projectId}/`}>{project.data.title}</a> · Chapter {number} of {siblings.length}</p>
+      <p class="eyebrow eyebrow--accent"><a href={`/projects/${projectId}/`}>{project.data.title}</a> · {number < 10 ? `Chapter ${number} of ${siblings.filter((c) => c.data.number < 10).length}` : 'Gallery'}</p>
       <h1><span class="mono chapter-head__num">{num}</span> {title}</h1>
       <p class="lede">{summary}</p>
     </header>

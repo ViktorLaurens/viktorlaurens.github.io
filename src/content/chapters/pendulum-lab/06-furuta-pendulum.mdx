@@ -159,11 +159,13 @@ fixed times, computes a voltage and **holds** it until the next reading. Chapter
 also need the simulator to be fast, because a learning controller will run it millions of
 times. So the simulator for control takes **fixed steps** with a held voltage.
 
-The plan was to cross-check our equations against MuJoCo, the physics engine chapter 8's
-reinforcement learning environment will use, which derives the equations itself from bodies
-and joints. The MuJoCo model is written, but MuJoCo's library is blocked by this machine's
-application control policy. The cross-check therefore moves to chapter 8, and this section
-tests our own fixed-step simulator against the adaptive reference instead.
+The plan was to cross-check our equations against MuJoCo, a physics engine widely used for
+reinforcement learning, which derives the equations itself from bodies and joints. The
+MuJoCo model is written, but MuJoCo's library is blocked by this machine's application
+control policy. The cross-check therefore moves to chapter 8, and this section tests our own
+fixed-step simulator against the adaptive reference instead. (It was done in
+[section 8.1](/projects/pendulum-lab/08-hybrid-learning-and-control/#the-gap-to-reality): MuJoCo reproduces our
+equations to $2 \cdot 10^{-4}$ degrees over 5 s.)
 
 ### Which integrator, which step
 
@@ -572,6 +574,7 @@ Three lessons carry beyond the pendulum:
 - **Models pay off online too.** The identified model turned noisy encoder differences into
   clean velocity estimates, the input a controller needs.
 
-The cross-check of the simulator against MuJoCo, planned for 6.2, moves to chapter 8.
+The cross-check of the simulator against MuJoCo, planned for 6.2, moves to chapter 8
+(done in [section 8.1](/projects/pendulum-lab/08-hybrid-learning-and-control/#the-gap-to-reality)).
 
-**Next:** chapter 7 · classical control.
+**Next:** chapter 7 · control with guarantees.

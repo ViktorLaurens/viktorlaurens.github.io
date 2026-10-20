@@ -1,6 +1,6 @@
 ---
 title: "Pendulum Lab"
-summary: "One system, four questions. A long-form study that takes the pendulum from first-principles modelling through classical and learning-based identification, Kalman filtering and an underactuated Furuta pendulum, on the way to control."
+summary: "One system, four questions. A nine-chapter study that takes the pendulum from first-principles modelling through classical and learning-based identification, Kalman filtering and the underactuated Furuta pendulum to control with guarantees, hybrid learning and control, and an underwater manipulator."
 date: 2026-10-01
 tags: [modelling, identification, estimation, learning, control]
 featured: true
@@ -80,12 +80,30 @@ process noise. Made part of the state, the parameters are identified online (5.6
 end of the recording the filter lands on the offline result of 2.4. Identification and state
 estimation are the same posterior, asked about different unknowns with different data.
 
-## What is still to come
+### Why this order
 
-Chapters 7 and 8 are planned: **classical control** of the Furuta pendulum (LQR balancing,
-energy-based swing-up, model predictive control) and **reinforcement learning** (PPO and SAC
-in a MuJoCo + Gymnasium environment), both built on the model, the identified parameters and
-the state estimator from the chapters above.
+1. **The pendulum**: the forward problem, the model and its phase space.
+2. **Classical identification**: the fewest unknowns. The structure comes from physics, only
+   the parameters are unknown, and the whole recording is available.
+3. **Learning-based identification**: the same question with a flexible model class.
+   A Neural ODE is output error with a neural network in place of the pendulum equation.
+4. **Identification benchmark**: all models of chapters 2 and 3, on the same frozen data.
+5. **State estimation**: online. It needs a model, any of the identified ones, and estimates
+   the state in real time, the input a controller needs.
+6. **The Furuta pendulum**: the same questions for a harder, underactuated system.
+7. **Control with guarantees**: a model and an estimated state, used to act, with stability
+   and safety that can be argued for.
+8. **Hybrid learning and control**: control learned from interaction, alone and combined with
+   the models and guarantees of chapter 7.
+9. **An underwater manipulator**: the whole programme repeated on a thruster-driven arm, to
+   see what scales and what does not.
+
+## Every controller, side by side
+
+The [controller gallery](/projects/pendulum-lab/controller-gallery/) runs every controller of
+chapters 7 and 8 on the same pendulum at the same time: swinging up from rest, balancing
+through a push, and carrying a payload it was never designed for. It is the fastest way to see
+what each method buys and what it costs.
 
 ## How it was made
 
