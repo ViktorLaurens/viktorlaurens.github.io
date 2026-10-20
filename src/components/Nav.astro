@@ -14,7 +14,7 @@ const isActive = (href: string) => path === href || path.startsWith(href);
         <circle cx="16" cy="5" r="2" fill="currentColor" />
         <circle class="brand__bob" cx="23" cy="22" r="4.5" />
       </svg>
-      <span class="brand__name">Viktor De&nbsp;Groote</span>
+      <span class="brand__name">Viktor Laurens De&nbsp;Groote</span>
     </a>
     <nav aria-label="Primary">
       <ul class="nav__links">
@@ -72,5 +72,11 @@ const isActive = (href: string) => path === href || path.startsWith(href);
   .theme__sun, .theme__rays { display: none; }
   :global([data-theme="light"]) .theme__moon { display: none; }
   :global([data-theme="light"]) .theme__sun, :global([data-theme="light"]) .theme__rays { display: block; }
-  @media (max-width: 480px) { .brand__name { display: none; } }
+  @media (max-width: 600px) {
+    .nav__in { flex-wrap: wrap; height: auto; padding-block: .7rem .55rem; row-gap: .35rem; }
+    .nav__in nav { width: 100%; }
+    .nav__links { gap: .9rem; }
+    .nav__links li:last-child { margin-left: auto; }
+    .theme { margin-right: -8px; }
+  }
 </style>
