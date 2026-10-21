@@ -21,23 +21,30 @@ const themes = [
   <section class="hero container">
     <div class="hero__text">
       <div class="byline">
-        <Image class="byline__photo" src={portrait} alt="Portrait of Viktor Laurens De Groote" width={192} height={192} densities={[1, 2]} loading="eager" />
+        <Image class="byline__photo" src={portrait} alt="Portrait of Viktor Laurens De Groote" width={160} height={160} densities={[1, 2]} loading="eager" />
         <div>
           <p class="byline__name">Viktor Laurens De Groote</p>
           <p class="eyebrow eyebrow--accent">Brussels · Belgium</p>
         </div>
       </div>
-      <h1>Engineer in control, learning, perception and robotics.</h1>
-      <p class="lede">
-        I work on the loop between a model and the real world: identifying dynamics from data,
-        estimating state in real time, and designing controllers you can trust. Most recently
-        visual-inertial SLAM and 3D reconstruction at Buildwise; before that, underwater robots at
-        NTNU and multi-robot motion planning for my thesis.
-      </p>
-      <div class="hero__cta">
-        <a class="btn btn--primary" href="/projects/">See the projects</a>
-        <a class="btn" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">Download CV</a>
+      <div class="hero__words">
+        <h1 class="hero__hi">Hi, I'm Viktor!</h1>
+        <p class="hero__line">I'm fascinated by mathematics and the surprising things you can do with it.</p>
+        <p class="hero__intro">
+          At sixteen a chaos-theory project got me hooked on dynamical systems, and I never recovered.
+          Since then the same ideas keep showing up wherever I look: a swinging pendulum, a noisy
+          sensor, a building scanned with cameras and lidar. This site is my lab notebook, open to
+          anyone who shares the curiosity. Start with the pendulum: drag it, let go, press Balance.
+        </p>
       </div>
+      <nav class="start" aria-label="Start here">
+        <p class="eyebrow">Start here</p>
+        <ul>
+          <li><a href="#pendulum-sim" data-start="balance">Watch a controller swing it up <span aria-hidden="true">→</span></a></li>
+          <li><a href="/projects/pendulum-lab/01-simple-pendulum/">Read the pendulum story from chapter 1 <span aria-hidden="true">→</span></a></li>
+          <li><a href="/about/">Who is this person? <span aria-hidden="true">→</span></a></li>
+        </ul>
+      </nav>
     </div>
     <div class="hero__sim">
       <PendulumHero />
@@ -86,17 +93,39 @@ const themes = [
   </section>
 </Base>
 
+<script>
+  // "Watch a controller swing it up": bring the simulation into view and press Balance for them.
+  document.addEventListener('click', (e) => {
+    const a = (e.target as Element).closest<HTMLAnchorElement>('[data-start="balance"]');
+    if (!a) return;
+    e.preventDefault();
+    const sim = document.getElementById('pendulum-sim');
+    const balance = document.getElementById('sim-balance') as HTMLButtonElement | null;
+    sim?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => { if (balance && balance.getAttribute('aria-pressed') !== 'true') balance.click(); }, 450);
+  });
+</script>
+
 <style>
-  .hero { display: grid; gap: var(--space-12); padding-block: var(--space-12) var(--space-8); align-items: center; }
+  /* One screen tall on desktop; both columns centred so the pendulum sits mid-viewport on load. */
+  .hero { display: grid; gap: var(--space-10, 2.5rem); padding-block: var(--space-8) var(--space-8); align-items: center; }
   @media (min-width: 980px) {
-    .hero { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); padding-block: var(--space-16) var(--space-12); min-height: calc(100dvh - 64px); }
+    .hero { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: var(--space-12); padding-block: var(--space-6); min-height: calc(100dvh - 64px); }
   }
   .hero__text { display: grid; gap: var(--space-6); }
-  .byline { display: flex; align-items: center; gap: var(--space-4); }
-  .byline__photo { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; object-position: center 30%; border: 2px solid var(--line-strong); box-shadow: 0 0 0 4px var(--bg), 0 0 0 5px var(--accent-soft); filter: grayscale(1); }
-  .byline__name { font-weight: 600; font-size: 1.05rem; letter-spacing: -0.01em; }
-  .byline .eyebrow { margin-top: .15em; }
-  .hero__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  .byline { display: flex; align-items: center; gap: var(--space-3); }
+  .byline__photo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; object-position: center 30%; border: 2px solid var(--line-strong); box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--accent-soft); filter: grayscale(1); }
+  .byline__name { font-weight: 600; font-size: .98rem; letter-spacing: -0.01em; }
+  .byline .eyebrow { margin-top: .1em; font-size: .72rem; }
+  .hero__words { display: grid; gap: var(--space-3); }
+  .hero__hi { font-size: clamp(2rem, 1.4rem + 1.8vw, 2.75rem); font-weight: 600; letter-spacing: -0.02em; }
+  .hero__line { font-size: clamp(1.15rem, 1rem + .6vw, 1.4rem); font-weight: 500; line-height: 1.35; letter-spacing: -0.01em; text-wrap: balance; max-width: 30ch; }
+  .hero__intro { color: var(--fg-muted); line-height: 1.6; max-width: 52ch; text-wrap: pretty; margin-top: var(--space-2); }
+  .start ul { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: .35em; }
+  .start a { display: inline-flex; align-items: baseline; gap: .4em; text-decoration: none; color: var(--fg); font-weight: 500; font-size: .98rem; padding: .25em 0; border-bottom: 1px solid var(--line); }
+  .start a span { color: var(--fg-faint); transition: transform .2s var(--ease), color .2s var(--ease); }
+  .start a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .start a:hover span { color: var(--accent); transform: translateX(3px); }
   .themes { margin: 0; display: grid; gap: var(--space-6); grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
   .themes__item { border-top: 1px solid var(--line-strong); padding-top: var(--space-4); }
   .themes dt { font-weight: 600; font-size: 1.1rem; margin-bottom: var(--space-2); }
