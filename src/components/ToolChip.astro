@@ -1,0 +1,44 @@
+---
+/**
+ * A tool or language as a chip, with its brand icon where one exists. Brand icons come from
+ * Simple Icons (CC0) with their official colour; colours too dark or too light for the
+ * current theme fall back to the text colour so every icon stays visible in both themes.
+ */
+import { Image } from 'astro:assets';
+import * as icons from 'simple-icons';
+import matlab from '../assets/logos/matlab.png';
+
+interface Props {
+  name: string;
+  icon?: string; // Simple Icons slug, e.g. 'pytorch', or 'matlab'
+}
+const { name, icon } = Astro.props;
+
+type SI = { path: string; hex: string; title: string };
+const key = icon && icon !== 'matlab' ? `si${icon.charAt(0).toUpperCase()}${icon.slice(1)}` : undefined;
+const si = key ? (icons as unknown as Record<string, SI | undefined>)[key] : undefined;
+
+let tone = '';
+let colour = 'currentColor';
+if (si) {
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(si.hex.slice(i, i + 2), 16) / 255);
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  colour = `#${si.hex}`;
+  tone = L < 0.06 ? 'dark' : L > 0.8 ? 'light' : '';
+}
+---
+<span class={`chip ${tone ? `chip--${tone}` : ''}`} style={`--brand:${colour}`}>
+  {si && <svg class="chip__icon" viewBox="0 0 24 24" aria-hidden="true"><path d={si.path} /></svg>}
+  {icon === 'matlab' && <Image class="chip__img" src={matlab} alt="" width={36} height={32} />}
+  <span>{name}</span>
+</span>
+
+<style>
+  .chip { display: inline-flex; align-items: center; gap: .45em; padding: .32em .7em; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-raised); font-size: .84rem; line-height: 1.2; color: var(--fg); white-space: nowrap; }
+  .chip__icon { width: 15px; height: 15px; fill: var(--brand); flex: none; }
+  .chip__img { width: 17px; height: 15px; object-fit: contain; flex: none; }
+  /* Brand colours that vanish on one of the themes use the text colour there. */
+  :global([data-theme="dark"]) .chip--dark .chip__icon { fill: var(--fg); }
+  :global([data-theme="light"]) .chip--light .chip__icon { fill: var(--fg); }
+</style>
