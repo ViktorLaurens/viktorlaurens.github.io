@@ -1,4 +1,5 @@
 ---
+import ContactIcon from './ContactIcon.astro';
 const year = new Date().getFullYear();
 ---
 <footer class="footer">
@@ -8,10 +9,10 @@ const year = new Date().getFullYear();
       <p class="muted">Engineer in control, learning and robotics. Perception, estimation and planning for machines in the real world. Brussels, Belgium.</p>
     </div>
     <ul class="footer__links" aria-label="Contact and profiles">
-      <li><a href="mailto:viktor.degroote@gmail.com">viktor.degroote@gmail.com</a></li>
-      <li><a href="https://www.linkedin.com/in/viktor-laurens-de-groote/" rel="me noopener" target="_blank">LinkedIn</a></li>
-      <li><a href="https://github.com/ViktorLaurens" rel="me noopener" target="_blank">GitHub</a></li>
-      <li><a href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">CV (PDF)</a></li>
+      <li><a href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" />viktor.degroote@gmail.com</a></li>
+      <li><a href="https://www.linkedin.com/in/viktor-laurens-de-groote/" rel="me noopener" target="_blank"><ContactIcon name="linkedin" />LinkedIn</a></li>
+      <li><a href="https://github.com/ViktorLaurens" rel="me noopener" target="_blank"><ContactIcon name="github" />GitHub</a></li>
+      <li><a href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" />CV (PDF)</a></li>
     </ul>
   </div>
   <div class="container footer__meta faint">
@@ -25,9 +26,11 @@ const year = new Date().getFullYear();
   .footer__in { display: grid; gap: var(--space-8); padding-block: var(--space-12); grid-template-columns: 1fr; }
   @media (min-width: 720px) { .footer__in { grid-template-columns: 1.4fr 1fr; } }
   .footer__name { font-weight: 600; }
-  .footer__links { list-style: none; margin: 0; padding: 0; display: grid; gap: .5em; font-family: var(--font-mono); font-size: .92rem; }
-  .footer__links a { text-decoration: none; color: var(--fg-muted); }
-  .footer__links a:hover { color: var(--accent); }
+  .footer__links { list-style: none; margin: 0; padding: 0; display: grid; gap: .6em; font-family: var(--font-mono); font-size: .92rem; }
+  .footer__links a { display: inline-flex; align-items: center; gap: .7em; text-decoration: none; color: var(--fg-muted); }
+  .footer__links a:hover { color: var(--fg); }
+  .footer__links a :global(.ci) { transition: transform .2s var(--ease); }
+  .footer__links a:hover :global(.ci) { transform: scale(1.12); }
   .footer__meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-4) var(--space-8); font-size: .82rem; font-family: var(--font-mono); }
   .footer__meta a { text-decoration: none; }
 </style>

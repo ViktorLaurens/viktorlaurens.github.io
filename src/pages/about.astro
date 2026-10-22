@@ -1,56 +1,116 @@
 ---
 import { Image } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
 import portrait from '../assets/portrait.jpg';
 import Base from '../layouts/Base.astro';
+import OrgLogo from '../components/OrgLogo.astro';
+import Flag from '../components/Flag.astro';
+import ToolChip from '../components/ToolChip.astro';
+import ContactIcon from '../components/ContactIcon.astro';
+import buildwise from '../assets/logos/buildwise.svg';
+import ormit from '../assets/logos/ormit-talent.png';
+import ntnu from '../assets/logos/ntnu.svg';
+import pstereo from '../assets/logos/pstereo.svg';
+import vubRacing from '../assets/logos/vub-racing.png';
+import vub from '../assets/logos/vub.svg';
+import ulb from '../assets/logos/ulb.svg';
+import mit from '../assets/logos/mit.svg';
+import haas from '../assets/logos/berkeley-haas.svg';
 
-const experience = [
+interface Logo { src: ImageMetadata; alt: string; href?: string }
+interface Entry { when: string; what: string; where: string; note: string; logos: Logo[] }
+
+const experience: Entry[] = [
   {
     when: 'Mar 2025 – Jul 2026',
     what: 'Research engineer (ORMIT Talent trainee)',
     where: 'Buildwise, Belgian Construction Research Institute · Brussels',
     note: 'Learning-based visual perception and 3D reconstruction for building assessment and construction monitoring. Fine-tuned vision models in PyTorch for semantic and instance segmentation. Built reconstruction pipelines that pair EKF-based visual-inertial SLAM for online state estimation with offline bundle adjustment and factor-graph optimisation in GTSAM and Ceres, giving real-time scan-coverage feedback and more accurate models. Turned these into tools for condition assessment, renovation planning and progress monitoring against BIM.',
+    logos: [
+      { src: buildwise, alt: 'Buildwise', href: 'https://www.buildwise.be/en/' },
+      { src: ormit, alt: 'ORMIT Talent', href: 'https://www.ormittalent.be/en' },
+    ],
   },
   {
     when: 'Jul – Oct 2023',
     what: 'Research intern, Department of Engineering Cybernetics',
     where: 'NTNU · Trondheim, Norway',
     note: 'Distributed, communication-aware path planning for autonomous underwater fleets. Built an optical communication framework for AUVs with Hydromea Luma modems.',
+    logos: [{ src: ntnu, alt: 'NTNU', href: 'https://www.ntnu.edu/itk' }],
+  },
+  {
+    when: 'Aug 2023',
+    what: 'Volunteer security team leader',
+    where: 'PSTEREO music festival · Trondheim, Norway',
+    note: 'Led a security team over the festival weekend: monitoring the grounds, managing crowds and handling incidents, and making sure the people we were looking after had a good time.',
+    logos: [{ src: pstereo, alt: 'PSTEREO', href: 'https://pstereo.no/en' }],
   },
   {
     when: 'Sep – Dec 2022',
     what: 'Driverless team member',
     where: 'VUB Racing, Formula Student',
     note: 'The team\'s first driverless vehicle.',
+    logos: [{ src: vubRacing, alt: 'VUB Racing', href: 'https://vubracing.com/' }],
   },
 ];
 
-const education = [
+const education: Entry[] = [
   {
     when: '2022 – 2024',
     what: 'MSc Electromechanical Engineering: Robotics',
     where: 'Vrije Universiteit Brussel & Université Libre de Bruxelles',
     note: 'Magna cum laude. Control-oriented electives: Advanced Control (19/20), Optimisation-based Control Design (17/20). Projects on load-swing suppression for a knuckle crane, a PINN for pendulum prediction and parameter identification, vibration-isolation modelling for the Einstein Telescope, a self-written finite-element solver, real-time embedded systems and MPC for mobile robots. Thesis: a hybrid of Conflict-Based Search and Probabilistic Roadmaps for motion planning of multiple manipulators.',
+    logos: [
+      { src: vub, alt: 'Vrije Universiteit Brussel', href: 'https://www.vub.be/en' },
+      { src: ulb, alt: 'Université libre de Bruxelles', href: 'https://www.ulb.be/en' },
+    ],
   },
   {
     when: '2019 – 2022',
     what: 'BSc Engineering: Electromechanical Engineering',
     where: 'Vrije Universiteit Brussel',
     note: 'Magna cum laude. Student delegate. Co-wrote a course text on DC motor drives for ArcelorMittal Belgium. Most memorable project: a rope-climbing robot.',
-  },
-  {
-    when: 'Nov 2024 – Apr 2025',
-    what: 'Professional courses in machine learning',
-    where: 'MIT Professional Education · Berkeley Haas',
-    note: 'Applied Data Science Program (MIT) and Artificial Intelligence: Business Strategies and Applications (Berkeley): computer vision, NLP and decision-making.',
+    logos: [{ src: vub, alt: 'Vrije Universiteit Brussel', href: 'https://www.vub.be/en' }],
   },
 ];
 
-const tools = [
-  { k: 'Control & estimation', v: 'MATLAB / Simulink, Control System Toolbox, MPT3, CasADi, GTSAM, Ceres Solver' },
-  { k: 'Learning', v: 'PyTorch, NumPy / SciPy, OpenCV' },
-  { k: 'Robotics & simulation', v: 'ROS 2, MoveIt 2, PyBullet, MuJoCo, Robotics Toolbox, Isaac Sim / Isaac Lab' },
-  { k: '3D reconstruction', v: 'COLMAP, 3D Gaussian Splatting, Metashape, Unity' },
-  { k: 'Languages & tools', v: 'Python, C++, Java, Linux, Git, Autodesk Inventor' },
+const certificates: Entry[] = [
+  {
+    when: 'Nov 2024 – Apr 2025',
+    what: 'Applied Data Science Program: Leveraging AI for Effective Decision-Making',
+    where: 'MIT Professional Education · Cambridge, Massachusetts',
+    note: 'Machine learning for computer vision, natural language processing and decision-making.',
+    logos: [{ src: mit, alt: 'MIT', href: 'https://professional.mit.edu/' }],
+  },
+  {
+    when: 'Nov 2024 – Feb 2025',
+    what: 'Artificial Intelligence: Business Strategies and Applications',
+    where: 'Berkeley Haas School of Business · Berkeley, California',
+    note: 'How AI systems are built, deployed and evaluated in organisations.',
+    logos: [{ src: haas, alt: 'Berkeley Haas', href: 'https://haas.berkeley.edu/' }],
+  },
+];
+
+const tools: Array<{ k: string; items: Array<{ name: string; icon?: string }> }> = [
+  { k: 'Control & estimation', items: [{ name: 'MATLAB / Simulink', icon: 'matlab' }, { name: 'Control System Toolbox' }, { name: 'MPT3' }, { name: 'CasADi' }, { name: 'GTSAM' }, { name: 'Ceres Solver' }] },
+  { k: 'Learning', items: [{ name: 'PyTorch', icon: 'pytorch' }, { name: 'NumPy', icon: 'numpy' }, { name: 'SciPy', icon: 'scipy' }, { name: 'OpenCV', icon: 'opencv' }] },
+  { k: 'Robotics & simulation', items: [{ name: 'ROS 2', icon: 'ros' }, { name: 'MoveIt 2' }, { name: 'PyBullet' }, { name: 'MuJoCo' }, { name: 'Robotics Toolbox' }, { name: 'Isaac Sim / Isaac Lab', icon: 'nvidia' }] },
+  { k: '3D reconstruction', items: [{ name: 'COLMAP' }, { name: '3D Gaussian Splatting' }, { name: 'Metashape' }, { name: 'Unity', icon: 'unity' }] },
+  { k: 'Languages & tools', items: [{ name: 'Python', icon: 'python' }, { name: 'C++', icon: 'cplusplus' }, { name: 'Java', icon: 'openjdk' }, { name: 'Linux', icon: 'linux' }, { name: 'Git', icon: 'git' }, { name: 'Autodesk Inventor', icon: 'autodesk' }] },
+];
+
+const languages: Array<{ name: string; level: string; flag: 'be' | 'gb' | 'fr' | 'de' | 'no' }> = [
+  { name: 'Dutch', level: 'native', flag: 'be' },
+  { name: 'English', level: 'C1', flag: 'gb' },
+  { name: 'French', level: 'B2', flag: 'fr' },
+  { name: 'German', level: 'B1', flag: 'de' },
+  { name: 'Norwegian', level: 'A1', flag: 'no' },
+];
+
+const sections: Array<{ title: string; entries: Entry[] }> = [
+  { title: 'Experience', entries: experience },
+  { title: 'Education', entries: education },
+  { title: 'Certificates', entries: certificates },
 ];
 ---
 <Base title="About" description="Who I am: an engineer in control, learning and robotics from Brussels, with a weakness for nonlinear dynamics.">
@@ -85,9 +145,10 @@ const tools = [
         </p>
       </div>
       <div class="about__cta">
-        <a class="btn btn--primary" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">Download CV (PDF)</a>
-        <a class="btn" href="mailto:viktor.degroote@gmail.com">Email</a>
-        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener">LinkedIn</a>
+        <a class="btn btn--primary" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" brand={false} />Download CV (PDF)</a>
+        <a class="btn" href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" />Email</a>
+        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener"><ContactIcon name="linkedin" />LinkedIn</a>
+        <a class="btn" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener"><ContactIcon name="github" />GitHub</a>
       </div>
 
       <h2 class="h3" style="margin-top: var(--space-16)">Toolbox</h2>
@@ -95,41 +156,44 @@ const tools = [
         {tools.map((t) => (
           <div class="tools__row">
             <dt>{t.k}</dt>
-            <dd class="mono">{t.v}</dd>
+            <dd class="tools__chips">{t.items.map((i) => <ToolChip name={i.name} icon={i.icon} />)}</dd>
           </div>
         ))}
       </dl>
-      <p class="mono tools__langs muted">Dutch (native) · English (C1) · French (B2) · German (B1) · Norwegian (A1)</p>
+
+      <h2 class="h3">Languages</h2>
+      <ul class="langs">
+        {languages.map((l) => (
+          <li class="lang">
+            <Flag code={l.flag} size={22} />
+            <span class="lang__name">{l.name}</span>
+            <span class="lang__level mono">{l.level}</span>
+          </li>
+        ))}
+      </ul>
     </div>
 
     <div class="about__side">
-      <h2 class="h3">Experience</h2>
-      <ol class="timeline">
-        {experience.map((t) => (
-          <li>
-            <span class="mono timeline__when">{t.when}</span>
-            <div>
-              <p class="timeline__what">{t.what}</p>
-              <p class="muted timeline__where">{t.where}</p>
-              <p class="timeline__note">{t.note}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
-
-      <h2 class="h3">Education</h2>
-      <ol class="timeline">
-        {education.map((t) => (
-          <li>
-            <span class="mono timeline__when">{t.when}</span>
-            <div>
-              <p class="timeline__what">{t.what}</p>
-              <p class="muted timeline__where">{t.where}</p>
-              <p class="timeline__note">{t.note}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
+      {sections.map((s) => (
+        <>
+          <h2 class="h3">{s.title}</h2>
+          <ol class="timeline">
+            {s.entries.map((t) => (
+              <li>
+                <div class="timeline__logos">
+                  {t.logos.map((l) => <OrgLogo src={l.src} alt={l.alt} href={l.href} />)}
+                </div>
+                <div>
+                  <span class="mono timeline__when">{t.when}</span>
+                  <p class="timeline__what">{t.what}</p>
+                  <p class="muted timeline__where">{t.where}</p>
+                  <p class="timeline__note">{t.note}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </>
+      ))}
 
       <h2 class="h3">Off the clock</h2>
       <p class="muted">Tennis, padel, golf, cycling and running. Chess, cooking, travel, and engineering projects that have no business being finished on a weekend.</p>
@@ -141,21 +205,26 @@ const tools = [
   .about { display: grid; gap: var(--space-16); }
   @media (min-width: 980px) { .about { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-24); } }
   .about__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-8); }
+  .about__cta :global(.btn) { gap: .55em; }
   .about__photo { width: 200px; height: 236px; object-fit: cover; object-position: center 25%; border-radius: var(--radius-lg); border: 1px solid var(--line); margin-bottom: var(--space-8); filter: grayscale(1); }
   @media (max-width: 540px) { .about__photo { width: 150px; height: 177px; } }
   .h3 { font-size: 1.1rem; margin-top: var(--space-12); margin-bottom: var(--space-4); }
   .about__side > .h3:first-child { margin-top: 0; }
   .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-6); }
-  .timeline li { display: grid; gap: var(--space-2); grid-template-columns: 1fr; padding-top: var(--space-4); border-top: 1px solid var(--line); }
-  @media (min-width: 540px) { .timeline li { grid-template-columns: 9.5rem 1fr; gap: var(--space-4); } }
-  .timeline__when { font-size: .82rem; color: var(--fg-muted); padding-top: .25em; }
+  .timeline li { display: grid; gap: var(--space-4); grid-template-columns: auto minmax(0, 1fr); align-items: start; padding-top: var(--space-4); border-top: 1px solid var(--line); }
+  .timeline__logos { display: grid; gap: var(--space-2); }
+  .timeline__when { display: block; font-size: .78rem; color: var(--fg-faint); margin-bottom: .2em; }
   .timeline__what { font-weight: 600; }
   .timeline__where { font-size: .95rem; }
   .timeline__note { margin-top: .4em; font-size: .95rem; color: var(--fg-muted); line-height: 1.5; }
   .tools { margin: 0; display: grid; gap: var(--space-3); }
   .tools__row { display: grid; gap: var(--space-1); padding-top: var(--space-3); border-top: 1px solid var(--line); }
   @media (min-width: 540px) { .tools__row { grid-template-columns: 11rem 1fr; gap: var(--space-4); } }
-  .tools dt { font-weight: 500; font-size: .95rem; }
-  .tools dd { margin: 0; font-size: .85rem; color: var(--fg-muted); line-height: 1.7; }
-  .tools__langs { font-size: .85rem; margin-top: var(--space-6); }
+  .tools dt { font-weight: 500; font-size: .95rem; padding-top: .3em; }
+  .tools dd { margin: 0; }
+  .tools__chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .langs { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+  .lang { display: inline-flex; align-items: center; gap: .55em; padding: .35em .8em .35em .4em; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-raised); }
+  .lang__name { font-weight: 500; font-size: .92rem; }
+  .lang__level { font-size: .76rem; color: var(--fg-muted); }
 </style>

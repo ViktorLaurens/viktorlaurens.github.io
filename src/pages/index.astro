@@ -5,6 +5,7 @@ import portrait from '../assets/portrait.jpg';
 import Base from '../layouts/Base.astro';
 import PendulumHero from '../components/PendulumHero.astro';
 import ProjectCard from '../components/ProjectCard.astro';
+import ContactIcon from '../components/ContactIcon.astro';
 
 const projects = (await getCollection('projects'))
   .sort((a, b) => a.data.order - b.data.order || b.data.date.valueOf() - a.data.date.valueOf());
@@ -62,9 +63,10 @@ const featured = projects.filter((p) => p.data.featured).slice(0, 3);
         <p class="lede">Open to research collaborations and roles in control, learning and robotics.</p>
       </div>
       <div class="contact__links">
-        <a class="btn btn--primary" href="mailto:viktor.degroote@gmail.com">Email me</a>
-        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener">LinkedIn</a>
-        <a class="btn" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn--primary" href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" brand={false} />Email me</a>
+        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener"><ContactIcon name="linkedin" />LinkedIn</a>
+        <a class="btn" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener"><ContactIcon name="github" />GitHub</a>
+        <a class="btn" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" />CV</a>
       </div>
     </div>
   </section>
