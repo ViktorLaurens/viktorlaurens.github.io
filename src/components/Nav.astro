@@ -1,10 +1,12 @@
 ---
 const path = Astro.url.pathname;
 const links = [
+  { href: '/', label: 'Home' },
   { href: '/projects/', label: 'Projects' },
   { href: '/about/', label: 'About' },
 ];
-const isActive = (href: string) => path === href || path.startsWith(href);
+// Home is active only on the landing page itself; the others also for their sub-pages.
+const isActive = (href: string) => (href === '/' ? path === '/' : path === href || path.startsWith(href));
 ---
 <header class="nav">
   <div class="container nav__in">
