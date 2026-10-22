@@ -7,17 +7,20 @@ import OrgLogo from '../components/OrgLogo.astro';
 import Flag from '../components/Flag.astro';
 import ToolChip from '../components/ToolChip.astro';
 import ContactIcon from '../components/ContactIcon.astro';
-import buildwise from '../assets/logos/buildwise.svg';
-import ormit from '../assets/logos/ormit-talent.png';
-import ntnu from '../assets/logos/ntnu.svg';
+import buildwise from '../assets/logos/buildwise-mark.svg';
+import ormit from '../assets/logos/ormit-talent-mark.png';
+import ntnu from '../assets/logos/ntnu-mark.svg';
 import pstereo from '../assets/logos/pstereo.svg';
 import vubRacing from '../assets/logos/vub-racing.png';
-import vub from '../assets/logos/vub.svg';
+import vubRacingDark from '../assets/logos/vub-racing-dark.png';
+import vub from '../assets/logos/vub-mark.svg';
 import ulb from '../assets/logos/ulb.svg';
 import mit from '../assets/logos/mit.svg';
+import mitDark from '../assets/logos/mit-dark.svg';
 import haas from '../assets/logos/berkeley-haas.svg';
+import haasDark from '../assets/logos/berkeley-haas-dark.svg';
 
-interface Logo { src: ImageMetadata; alt: string; href?: string }
+interface Logo { src: ImageMetadata; dark?: ImageMetadata; alt: string; href?: string; wide?: boolean }
 interface Entry { when: string; what: string; where: string; note: string; logos: Logo[] }
 
 const experience: Entry[] = [
@@ -50,7 +53,7 @@ const experience: Entry[] = [
     what: 'Driverless team member',
     where: 'VUB Racing, Formula Student',
     note: 'The team\'s first driverless vehicle.',
-    logos: [{ src: vubRacing, alt: 'VUB Racing', href: 'https://vubracing.com/' }],
+    logos: [{ src: vubRacing, dark: vubRacingDark, alt: 'VUB Racing', href: 'https://vubracing.com/', wide: true }],
   },
 ];
 
@@ -80,14 +83,14 @@ const certificates: Entry[] = [
     what: 'Applied Data Science Program: Leveraging AI for Effective Decision-Making',
     where: 'MIT Professional Education · Cambridge, Massachusetts',
     note: 'Machine learning for computer vision, natural language processing and decision-making.',
-    logos: [{ src: mit, alt: 'MIT', href: 'https://professional.mit.edu/' }],
+    logos: [{ src: mit, dark: mitDark, alt: 'MIT', href: 'https://professional.mit.edu/', wide: true }],
   },
   {
     when: 'Nov 2024 – Feb 2025',
     what: 'Artificial Intelligence: Business Strategies and Applications',
     where: 'Berkeley Haas School of Business · Berkeley, California',
     note: 'How AI systems are built, deployed and evaluated in organisations.',
-    logos: [{ src: haas, alt: 'Berkeley Haas', href: 'https://haas.berkeley.edu/' }],
+    logos: [{ src: haas, dark: haasDark, alt: 'Berkeley Haas', href: 'https://haas.berkeley.edu/', wide: true }],
   },
 ];
 
@@ -181,7 +184,7 @@ const sections: Array<{ title: string; entries: Entry[] }> = [
             {s.entries.map((t) => (
               <li>
                 <div class="timeline__logos">
-                  {t.logos.map((l) => <OrgLogo src={l.src} alt={l.alt} href={l.href} />)}
+                  {t.logos.map((l) => <OrgLogo src={l.src} dark={l.dark} alt={l.alt} href={l.href} wide={l.wide} />)}
                 </div>
                 <div>
                   <span class="mono timeline__when">{t.when}</span>
@@ -212,7 +215,8 @@ const sections: Array<{ title: string; entries: Entry[] }> = [
   .about__side > .h3:first-child { margin-top: 0; }
   .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-6); }
   .timeline li { display: grid; gap: var(--space-4); grid-template-columns: auto minmax(0, 1fr); align-items: start; padding-top: var(--space-4); border-top: 1px solid var(--line); }
-  .timeline__logos { display: grid; gap: var(--space-2); }
+  .timeline__logos { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; width: 6.5rem; padding-top: .15rem; }
+  @media (max-width: 540px) { .timeline__logos { width: 5.25rem; gap: .45rem; } }
   .timeline__when { display: block; font-size: .78rem; color: var(--fg-faint); margin-bottom: .2em; }
   .timeline__what { font-weight: 600; }
   .timeline__where { font-size: .95rem; }
