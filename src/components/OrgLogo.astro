@@ -1,28 +1,35 @@
 ---
 /**
- * An organisation's logo on a small white tile. Most of these logos are dark artwork on a
- * transparent background; the tile keeps them legible in the dark theme and gives every logo
- * the same footprint in the timeline.
+ * An organisation's mark, without a background. Marks are shown at a common height so
+ * square and wide logos line up. Logos whose dark parts would vanish on the dark theme
+ * pass a `dark` variant (the organisation's reversed, white-on-dark version), which is
+ * swapped in by the theme.
  */
 import { Image } from 'astro:assets';
 import type { ImageMetadata } from 'astro';
 
 interface Props {
   src: ImageMetadata;
+  dark?: ImageMetadata;
   alt: string;
   href?: string;
+  wide?: boolean;
 }
-const { src, alt, href } = Astro.props;
+const { src, dark, alt, href, wide = false } = Astro.props;
 const Tag = href ? 'a' : 'span';
 ---
-<Tag class="org" href={href} target={href ? '_blank' : undefined} rel={href ? 'noopener' : undefined} title={alt}>
-  <Image class="org__img" src={src} alt={alt} width={240} densities={[1, 2]} loading="lazy" />
+<Tag class:list={['org', { 'org--wide': wide }]} href={href} target={href ? '_blank' : undefined} rel={href ? 'noopener' : undefined} title={alt}>
+  <Image class:list={['org__img', { 'org__img--light': !!dark }]} src={src} alt={alt} width={wide ? 260 : 96} densities={[1, 2]} loading="lazy" />
+  {dark && <Image class="org__img org__img--dark" src={dark} alt="" width={wide ? 260 : 96} densities={[1, 2]} loading="lazy" />}
 </Tag>
 
 <style>
-  .org { --w: 7rem; --h: 3.25rem; --pad-x: .6rem; --pad-y: .45rem; display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: var(--w); height: var(--h); padding: var(--pad-y) var(--pad-x); border-radius: 10px; background: #ffffff; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0,0,0,.08); transition: transform .2s var(--ease), box-shadow .2s var(--ease); overflow: hidden; }
-  a.org:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
-  /* Explicit limits: percentages do not resolve against an auto-sized grid row. */
-  .org__img { display: block; width: auto; height: auto; max-width: calc(var(--w) - 2 * var(--pad-x)); max-height: calc(var(--h) - 2 * var(--pad-y)); object-fit: contain; }
-  @media (max-width: 540px) { .org { --w: 5.75rem; --h: 2.75rem; --pad-x: .5rem; --pad-y: .4rem; } }
+  .org { --h: 2.5rem; display: inline-flex; align-items: center; height: var(--h); transition: transform .2s var(--ease), filter .2s var(--ease); }
+  a.org:hover { transform: translateY(-1px); filter: drop-shadow(0 4px 10px rgba(0,0,0,.25)); }
+  .org__img { display: block; height: var(--h); width: auto; max-width: var(--h); object-fit: contain; }
+  .org--wide .org__img { max-width: 6.5rem; height: auto; max-height: var(--h); }
+  .org__img--dark { display: none; }
+  :global([data-theme="dark"]) .org__img--light { display: none; }
+  :global([data-theme="dark"]) .org__img--dark { display: block; }
+  @media (max-width: 540px) { .org { --h: 2.1rem; } .org--wide .org__img { max-width: 5.25rem; } }
 </style>
