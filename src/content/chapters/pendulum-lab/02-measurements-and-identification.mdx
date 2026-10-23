@@ -132,8 +132,10 @@ $\pm 2\sigma = \pm 1^\circ$, centered on the offset $b = 1.5^\circ$ instead of o
 The variance of the noise is
 
 $$
-\mathrm{Var}(v_k) = (1-\varepsilon)\thinspace\sigma^2 + \varepsilon\thinspace\sigma_\text{out}^2
-= 0.99 \cdot (0.5^\circ)^2 + 0.01 \cdot (15^\circ)^2 \approx 0.25 + 2.25 = 2.50\ \mathrm{deg}^2 ,
+\begin{aligned}
+\mathrm{Var}(v_k) &= (1-\varepsilon)\thinspace\sigma^2 + \varepsilon\thinspace\sigma_\text{out}^2 \cr
+&= 0.99 \cdot (0.5^\circ)^2 + 0.01 \cdot (15^\circ)^2 \approx 0.25 + 2.25 = 2.50\ \mathrm{deg}^2 ,
+\end{aligned}
 $$
 
 a standard deviation of $1.58^\circ$. **1% of the samples cause 90% of the variance.**
@@ -486,7 +488,10 @@ discovery? We froze a second recording, `data/small_swing/`: the same
 pendulum and sensor, released from only $20^\circ$. SINDy now returns
 
 $$
-\ddot y = 576.9 - 1872\thinspace y - 286.2\thinspace y^2 + 306.6\thinspace y^3 + 1862\sin y - 576.7\cos y - 0.209\thinspace\dot y^3 - 0.046\thinspace\mathrm{sign}\thinspace\dot y .
+\begin{aligned}
+\ddot y = {} & 576.9 - 1872\thinspace y - 286.2\thinspace y^2 + 306.6\thinspace y^3 \cr
+& + 1862\sin y - 576.7\cos y - 0.209\thinspace\dot y^3 - 0.046\thinspace\mathrm{sign}\thinspace\dot y .
+\end{aligned}
 $$
 
 Huge coefficients that nearly cancel, no viscous damping at all, and no threshold gives
@@ -588,9 +593,10 @@ Why minimize the sum of *squares*? If the noise is Gaussian with standard deviat
 $\sigma$, the probability of the observed data given $p$ is
 
 $$
-\mathcal L(p) = \prod_k \frac{1}{\sigma\sqrt{2\pi}} \exp\left({-\frac{\big(y_k - \hat y_k(p)\big)^2}{2\sigma^2}}\right),
-\qquad
+\begin{gathered}
+\mathcal L(p) = \prod_k \frac{1}{\sigma\sqrt{2\pi}} \exp\left({-\frac{\big(y_k - \hat y_k(p)\big)^2}{2\sigma^2}}\right), \cr
 -\log\mathcal L(p) = \frac{1}{2\sigma^2}\sum_k \big(y_k - \hat y_k(p)\big)^2 + \text{const}.
+\end{gathered}
 $$
 
 Maximizing the likelihood is minimizing the sum of squares: with $\rho(r) = r^2$, the fit
