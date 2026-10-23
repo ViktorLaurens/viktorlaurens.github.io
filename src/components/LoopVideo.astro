@@ -1,0 +1,42 @@
+---
+/**
+ * A silent, looping video that downloads nothing until it is needed.
+ * `preload="none"` and a poster: the poster is what loads with the page. The page script
+ * (Base.astro, setupVideos) starts the video when it scrolls into view and pauses it when it
+ * leaves; under prefers-reduced-motion it never starts, so only the poster is shown.
+ * There is deliberately no `autoplay` attribute: the browser would start downloading every
+ * video on the page at once, including the ones far below the fold.
+ */
+interface Props {
+  src: string;
+  poster: string;
+  alt: string;
+  class?: string;
+}
+const { src, poster, alt, class: cls } = Astro.props;
+const hasCaption = Astro.slots.has('default');
+---
+<figure class:list={['lv', cls]}>
+  <video
+    class="lv__media"
+    src={src}
+    poster={poster}
+    muted
+    loop
+    playsinline
+    preload="none"
+    data-autoplay
+    width="1920"
+    height="1080"
+    aria-label={alt}
+  ></video>
+  {hasCaption && <figcaption class="lv__cap"><slot /></figcaption>}
+</figure>
+
+<style>
+  .lv { margin: 0; display: grid; gap: .65em; }
+  .lv__media { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: var(--radius); background: #000; border: 1px solid var(--line); }
+  .lv__cap { font-size: .92rem; line-height: 1.55; color: var(--fg-muted); }
+  .lv__cap :global(p) { margin: 0; }
+  .lv__cap :global(a) { color: var(--fg); }
+</style>

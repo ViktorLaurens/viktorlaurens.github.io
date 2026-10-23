@@ -81,14 +81,14 @@ const certificates: Entry[] = [
   {
     when: 'Nov 2024 – Apr 2025',
     what: 'Applied Data Science Program: Leveraging AI for Effective Decision-Making',
-    where: 'MIT Professional Education · Cambridge, Massachusetts',
+    where: 'MIT Professional Education · online',
     note: 'Machine learning for computer vision, natural language processing and decision-making.',
     logos: [{ src: mit, dark: mitDark, alt: 'MIT', href: 'https://professional.mit.edu/', wide: true }],
   },
   {
     when: 'Nov 2024 – Feb 2025',
     what: 'Artificial Intelligence: Business Strategies and Applications',
-    where: 'Berkeley Haas School of Business · Berkeley, California',
+    where: 'Berkeley Haas School of Business · online',
     note: 'How AI systems are built, deployed and evaluated in organisations.',
     logos: [{ src: haas, dark: haasDark, alt: 'Berkeley Haas', href: 'https://haas.berkeley.edu/', wide: true }],
   },
@@ -99,7 +99,7 @@ const tools: Array<{ k: string; items: Array<{ name: string; icon?: string }> }>
   { k: 'Learning', items: [{ name: 'PyTorch', icon: 'pytorch' }, { name: 'NumPy', icon: 'numpy' }, { name: 'SciPy', icon: 'scipy' }, { name: 'OpenCV', icon: 'opencv' }] },
   { k: 'Robotics & simulation', items: [{ name: 'ROS 2', icon: 'ros' }, { name: 'MoveIt 2' }, { name: 'PyBullet' }, { name: 'MuJoCo' }, { name: 'Robotics Toolbox' }, { name: 'Isaac Sim / Isaac Lab', icon: 'nvidia' }] },
   { k: '3D reconstruction', items: [{ name: 'COLMAP' }, { name: '3D Gaussian Splatting' }, { name: 'Metashape' }, { name: 'Unity', icon: 'unity' }] },
-  { k: 'Languages & tools', items: [{ name: 'Python', icon: 'python' }, { name: 'C++', icon: 'cplusplus' }, { name: 'Java', icon: 'openjdk' }, { name: 'Linux', icon: 'linux' }, { name: 'Git', icon: 'git' }, { name: 'Autodesk Inventor', icon: 'autodesk' }] },
+  { k: 'Languages & tools', items: [{ name: 'Python', icon: 'python' }, { name: 'C++', icon: 'cplusplus' }, { name: 'Java', icon: 'openjdk' }, { name: 'Linux', icon: 'linux' }, { name: 'Git', icon: 'git' }, { name: 'Docker', icon: 'docker' }, { name: 'Autodesk Inventor', icon: 'autodesk' }] },
 ];
 
 const languages: Array<{ name: string; level: string; flag: 'be' | 'gb' | 'fr' | 'de' | 'no' }> = [
@@ -147,6 +147,10 @@ const sections: Array<{ title: string; entries: Entry[] }> = [
           understanding into working technology.
         </p>
       </div>
+      <p class="about__now">
+        <span class="eyebrow eyebrow--accent">Current project</span>
+        <a href="/projects/pendulum-lab/">Pendulum Lab</a>: one system, taken from modelling and identification to control with guarantees and learning, in nine chapters.
+      </p>
       <div class="about__cta">
         <a class="btn btn--primary" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" brand={false} />Download CV (PDF)</a>
         <a class="btn" href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" />Email</a>
@@ -209,6 +213,9 @@ const sections: Array<{ title: string; entries: Entry[] }> = [
   @media (min-width: 980px) { .about { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: var(--space-24); } }
   .about__cta { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-8); }
   .about__cta :global(.btn) { gap: .55em; }
+  .about__now { margin-top: var(--space-8); padding: var(--space-4) var(--space-5, 1.25rem); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--bg-raised); color: var(--fg-muted); line-height: 1.55; max-width: var(--measure); }
+  .about__now .eyebrow { display: block; margin-bottom: .3em; }
+  .about__now a { color: var(--fg); font-weight: 600; }
   .about__photo { width: 200px; height: 236px; object-fit: cover; object-position: center 25%; border-radius: var(--radius-lg); border: 1px solid var(--line); margin-bottom: var(--space-8); filter: grayscale(1); }
   @media (max-width: 540px) { .about__photo { width: 150px; height: 177px; } }
   .h3 { font-size: 1.1rem; margin-top: var(--space-12); margin-bottom: var(--space-4); }

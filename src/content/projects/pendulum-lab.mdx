@@ -5,12 +5,17 @@ date: 2023-09-01
 tags: [modelling, identification, estimation, learning, control]
 featured: true
 order: 1
-coverVideo: /media/pendulum-lab/phase_flow.mp4
-coverAlt: "Phase flow of the damped pendulum"
+coverVideo: /media/pendulum-lab/showcase/hero.mp4
+coverPoster: /media/pendulum-lab/showcase/cards/hero.webp
+coverAlt: "A Furuta pendulum swinging up and balancing, its tip tracing a blue curve"
+heroVideo: /media/pendulum-lab/showcase/hero.mp4
+heroPoster: /media/pendulum-lab/showcase/hero.webp
+heroAlt: "A Furuta pendulum, a motor-driven arm with a pendulum at its tip, swinging up and balancing while the tip traces a blue curve"
 ---
 import Figure from '../../components/Figure.astro';
+import LoopVideo from '../../components/LoopVideo.astro';
 
-<Figure video="/media/pendulum-lab/phase_flow.mp4" width={100} alt="Streamlines flowing along the pendulum vector field">
+<Figure video="/media/pendulum-lab/phase_flow.mp4" poster="/media/pendulum-lab/phase_flow.webp" width={100} alt="Streamlines flowing along the pendulum vector field">
 
 Phase flow of the damped pendulum: every point of the plane is an initial condition $(\theta_0, \dot\theta_0)$.
 
@@ -23,6 +28,38 @@ closed-form solution, two kinds of equilibria, a real sensor with real outliers,
 its Furuta form, fewer motors than degrees of freedom. Every tool of control engineering can
 be tried on it and judged against ground truth. This project does exactly that, one chapter
 at a time, with every figure and animation generated from the same code.
+
+## Selected results
+
+All results on this page and in the chapters come from simulation.
+
+<div class="results">
+
+<LoopVideo src="/media/pendulum-lab/showcase/learn_object.mp4" poster="/media/pendulum-lab/showcase/learn_object.webp" alt="Two underwater vehicles with an arm grasp an object. On the left the controller is not told about it and the tip error oscillates far above 3 cm; on the right it learns the mass, 1.04 kg against a true 1.00 kg, and the error settles below 3 cm">
+
+Two physical parameters, fitted to half a second of the vehicle's own sensors, bring the controller back within 3 cm of its target 0.8 s after the grasp; a learned residual network in the same place drives it 85 to 115 cm off ([9.5](/projects/pendulum-lab/09-underwater-manipulator/#95-learning)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/pendulum-lab/showcase/safety_fold.mp4" poster="/media/pendulum-lab/showcase/safety_fold.webp" alt="Two underwater arms commanded into a wall. Without a filter the tip goes through the wall; with the safety filter the elbow folds and the tip stays above a 2 cm margin">
+
+Under a command that would put the arm's tip 8 cm into a structure, the safety filter stops it 1.7 to 1.8 cm short, by folding the elbow ([9.4](/projects/pendulum-lab/09-underwater-manipulator/#94-safety)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/pendulum-lab/showcase/model_gap.mp4" poster="/media/pendulum-lab/showcase/model_gap.webp" alt="Three underwater vehicles driven by the same commands. The identified model stays with the real vehicle, while the textbook model drifts away and ends 2.9 m off after 30 s">
+
+Given the same 30 s of thrust commands, the textbook model ends 2.9 m from the real vehicle and the model identified from one experiment within 7 cm ([9.2](/projects/pendulum-lab/09-underwater-manipulator/#92-thrusters-and-identification)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/pendulum-lab/showcase/rl_from_scratch.mp4" poster="/media/pendulum-lab/showcase/rl_from_scratch.webp" alt="One agent learning to swing up a Furuta pendulum, shown at five stages: untrained, after 50 s, 2.5 min and 5 min of experience, and balancing after 8.3 min">
+
+A soft actor-critic agent learns to swing the pendulum up and hold it within 30 000 to 60 000 steps, five to ten minutes of simulated experience ([8.1](/projects/pendulum-lab/08-hybrid-learning-and-control/#81-reinforcement-learning-from-scratch)).
+
+</LoopVideo>
+
+</div>
 
 ## The storyline: one problem, four questions
 
@@ -111,3 +148,5 @@ Everything is Python. Physics, sensors, estimators and data loading live in one 
 package; scripts regenerate every static figure from frozen benchmark datasets that are
 committed and never edited by hand; the animations are Manim scenes that only draw, with all
 physics imported from the same package. Tests check the physics, the data and the report.
+
+Code available on request.

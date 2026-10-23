@@ -93,6 +93,9 @@ p { margin: 0; }
 .tag { font-family: var(--font-mono); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); border: 1px solid var(--line); border-radius: 999px; padding: .2em .65em; }
 .grid { display: grid; gap: var(--space-6); grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
 
+/* Video results on project pages */
+.prose .results { display: grid; gap: var(--space-8); margin: 1.5em 0 2.5em; }
+
 /* Live demos */
 .demo { margin: 2.5em 0; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); padding: var(--space-4); display: grid; gap: var(--space-3); }
 .demo__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }

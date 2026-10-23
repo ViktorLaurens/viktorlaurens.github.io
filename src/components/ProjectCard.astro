@@ -6,12 +6,12 @@ interface Props {
   project: CollectionEntry<'projects'>;
 }
 const { project } = Astro.props;
-const { title, summary, tags, cover, coverAlt, coverVideo, date } = project.data;
+const { title, summary, tags, cover, coverAlt, coverVideo, coverPoster, date } = project.data;
 ---
 <a class="card" href={`/projects/${project.id}/`}>
   {coverVideo ? (
     <div class="card__media">
-      <video src={coverVideo} loop muted playsinline preload="metadata" data-autoplay aria-label={coverAlt ?? ''}></video>
+      <video src={coverVideo} poster={coverPoster} loop muted playsinline preload={coverPoster ? 'none' : 'metadata'} data-autoplay aria-label={coverAlt ?? ''}></video>
     </div>
   ) : cover ? (
     <div class="card__media">
