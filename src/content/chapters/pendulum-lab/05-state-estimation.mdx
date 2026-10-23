@@ -124,11 +124,13 @@ $$
 $$
 
 $$
+\begin{aligned}
 \text{update:}\qquad
-S = HP^-H^\top + R, \qquad
-K = P^-H^\top S^{-1}, \qquad
-\hat{\mathbf x} = \hat{\mathbf x}^- + K\big(y_k - b - H\hat{\mathbf x}^-\big), \qquad
+& S = HP^-H^\top + R, \qquad
+K = P^-H^\top S^{-1}, \cr
+& \hat{\mathbf x} = \hat{\mathbf x}^- + K\big(y_k - b - H\hat{\mathbf x}^-\big), \qquad
 P = (I - KH)P^- .
+\end{aligned}
 $$
 
 The **innovation** $y_k - b - H\hat{\mathbf x}^-$ is the surprise: how far the measurement is

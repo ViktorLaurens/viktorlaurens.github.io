@@ -143,9 +143,10 @@ units and meaning instead of being guessed. The optimal controller is $V = -K \t
 with $P$ the solution of the discrete Riccati equation:
 
 $$
-P = Q + A_d^\top P A_d - A_d^\top P B_d \left(R + B_d^\top P B_d\right)^{-1} B_d^\top P A_d,
-\qquad
+\begin{gathered}
+P = Q + A_d^\top P A_d - A_d^\top P B_d \left(R + B_d^\top P B_d\right)^{-1} B_d^\top P A_d, \cr
 K = \left(R + B_d^\top P B_d\right)^{-1} B_d^\top P A_d .
+\end{gathered}
 $$
 
 For the identified model, $K = [{-8.8}, 110.6, {-4.6}, 8.8]$ in volts per radian and per radian

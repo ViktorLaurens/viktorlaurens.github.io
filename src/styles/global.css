@@ -60,6 +60,9 @@ p { margin: 0; }
 .prose th, .prose td { border-bottom: 1px solid var(--line); padding: .5em .6em; text-align: left; vertical-align: top; }
 .prose th { color: var(--fg-muted); font-weight: 500; font-family: var(--font-mono); font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
 .katex-display { overflow-x: auto; overflow-y: hidden; padding: .4em 0; }
+/* Punctuation kept with inline math (src/plugins/rehype-math-punctuation.mjs): back to body text.
+   .katex is 1.21em of its surroundings, so this undoes it. */
+.katex .math-punct { font-family: var(--font-sans); font-size: calc(1em / 1.21); font-style: normal; font-weight: inherit; }
 
 /* Buttons */
 .btn {
