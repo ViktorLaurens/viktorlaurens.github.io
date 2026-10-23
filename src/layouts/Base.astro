@@ -32,7 +32,7 @@ const ogImage = new URL(image ?? `/og/${pagePath || 'home'}.png`, Astro.site);
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="sitemap" href="/sitemap-index.xml" />
+    <link rel="sitemap" href="/sitemap.xml" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
@@ -88,11 +88,9 @@ const ogImage = new URL(image ?? `/og/${pagePath || 'home'}.png`, Astro.site);
       function setupVideos(signal: AbortSignal) {
         const videos = document.querySelectorAll<HTMLVideoElement>('video[data-autoplay]');
         if (!videos.length) return;
+        // Reduced motion: never start; videos with a poster show it, the others their first frame.
         const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (reduced) {
-          videos.forEach((v) => { v.controls = true; });
-          return;
-        }
+        if (reduced) return;
         const io = new IntersectionObserver(
           (entries) => {
             for (const e of entries) {

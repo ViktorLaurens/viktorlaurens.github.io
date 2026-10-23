@@ -41,7 +41,7 @@ export async function getStaticPaths() {
   const cards: Array<{ params: { slug: string }; props: Card }> = [
     { params: { slug: 'home' }, props: { eyebrow: 'Viktor Laurens De Groote · Brussels', title: 'Engineer in control, learning, perception and robotics.', summary: 'Identifying dynamics from data, estimating state in real time, and designing controllers you can trust. With a live pendulum.', image: publicImage(PHASE) } },
     { params: { slug: 'about' }, props: { eyebrow: 'About', title: 'Viktor Laurens De Groote', summary: 'From the Lorenz attractor at sixteen to visual-inertial SLAM on building sites: control, learning, perception and robotics.', image: portrait } },
-    { params: { slug: 'projects' }, props: { eyebrow: 'Projects', title: 'Case studies', summary: 'Each project is a question, a method, results you can see, and the code behind them.', image: publicImage(PHASE) } },
+    { params: { slug: 'projects' }, props: { eyebrow: 'Projects', title: 'Case studies', summary: 'Each project is a question, a method, and the results it found, shown in figures you can see and play with.', image: publicImage(PHASE) } },
     { params: { slug: '404' }, props: { eyebrow: '404 · unstable equilibrium', title: 'This one fell over.', summary: 'The page you asked for is not a fixed point of this site.', image: publicImage(PHASE) } },
   ];
   for (const p of projects) {

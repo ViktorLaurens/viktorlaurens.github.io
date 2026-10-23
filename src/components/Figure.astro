@@ -12,10 +12,12 @@ import { join } from 'node:path';
 interface Props {
   src?: string;
   video?: string;
+  /** Poster for a video. With one, nothing of the video loads until it scrolls into view. */
+  poster?: string;
   alt: string;
   width?: number;
 }
-const { src, video, alt, width = 100 } = Astro.props;
+const { src, video, poster, alt, width = 100 } = Astro.props;
 
 let dims: { w: number; h: number } | undefined;
 if (src && src.startsWith('/') && src.endsWith('.png')) {
@@ -33,7 +35,7 @@ const videoRatio = '16 / 9';
 ---
 <figure class="fig" style={`--w: ${width}%`}>
   {video ? (
-    <video class="fig__media" src={video} loop muted playsinline preload="metadata" data-autoplay aria-label={alt} style={`aspect-ratio: ${videoRatio}`}></video>
+    <video class="fig__media" src={video} poster={poster} loop muted playsinline preload={poster ? 'none' : 'metadata'} data-autoplay aria-label={alt} style={`aspect-ratio: ${videoRatio}`}></video>
   ) : (
     <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" width={dims?.w} height={dims?.h} />
   )}

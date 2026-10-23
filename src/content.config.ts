@@ -15,6 +15,10 @@ const projects = defineCollection({
       cover: image().optional(),
       coverAlt: z.string().optional(),
       coverVideo: z.string().optional(),
+      coverPoster: z.string().optional(),
+      heroVideo: z.string().optional(),
+      heroPoster: z.string().optional(),
+      heroAlt: z.string().optional(),
     }),
 });
 

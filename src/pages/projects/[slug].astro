@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
+import LoopVideo from '../../components/LoopVideo.astro';
 
 export async function getStaticPaths() {
   const projects = await getCollection('projects');
@@ -9,7 +10,7 @@ export async function getStaticPaths() {
 
 const { project } = Astro.props;
 const { Content, headings } = await render(project);
-const { title, summary, date, tags, repo } = project.data;
+const { title, summary, date, tags, repo, heroVideo, heroPoster, heroAlt } = project.data;
 const toc = headings.filter((h) => h.depth === 2);
 const chapters = (await getCollection('chapters', (c) => c.data.project === project.id))
   .sort((a, b) => a.data.number - b.data.number);
@@ -17,6 +18,9 @@ const chapterSlug = (id: string) => id.split('/').pop();
 ---
 <Base title={title} description={summary}>
   <article class="project container">
+    {heroVideo && heroPoster && (
+      <LoopVideo class="project__hero" src={heroVideo} poster={heroPoster} alt={heroAlt ?? title} />
+    )}
     <header class="project__head">
       <p class="eyebrow eyebrow--accent">Project · {date.getFullYear()}</p>
       <h1>{title}</h1>
@@ -68,6 +72,7 @@ const chapterSlug = (id: string) => id.split('/').pop();
 
 <style>
   .project { padding-block: var(--space-12); }
+  .project :global(.project__hero) { margin-bottom: var(--space-10, 2.5rem); max-width: 60rem; }
   .project__head { display: grid; gap: var(--space-4); max-width: 60rem; margin-bottom: var(--space-12); }
   .project__meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-2); }
   .chapters { margin-bottom: var(--space-16); }
