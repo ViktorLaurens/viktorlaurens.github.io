@@ -14,10 +14,10 @@ interface Props {
 const site = 'Viktor Laurens De Groote';
 const {
   title,
-  description = 'Engineer in control, learning, perception and robotics. Case studies on dynamics, system identification, state estimation and control.',
+  description = "Hi, I'm Viktor. I'm fascinated by mathematics and the surprising things you can do with it: dynamics, estimation, control and learning, with figures you can play with.",
   image,
 } = Astro.props;
-const fullTitle = title ? `${title} · ${site}` : `${site} · control, learning, robotics`;
+const fullTitle = title ? `${title} · ${site}` : site;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 // One generated preview image per page: see src/pages/og/[...slug].png.ts
 const pagePath = Astro.url.pathname.replace(/\/$/, '').replace(/^\//, '');

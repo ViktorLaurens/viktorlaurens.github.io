@@ -9,6 +9,7 @@ import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import sharp from 'sharp';
 
 const W = 1200, H = 630;
 const C = { bg: '#0a0b0e', panel: '#000000', fg: '#ececec', muted: '#9a9a9a', faint: '#5a5f68', line: '#22262e', accent: '#58c4dd', yellow: '#f7d96f' };
@@ -22,15 +23,21 @@ const fonts = [
   { name: 'Mono', data: fontFile('IBMPlexMono-Regular.ttf'), weight: 400 as const, style: 'normal' as const },
 ];
 
-interface Card { eyebrow: string; title: string; summary: string; image?: string }
+/**
+ * `fit`: 'cover' fills the panel and crops the edges (photos, centred scenes);
+ * 'contain' shows the whole image on black (figures whose labels must not be cut off).
+ */
+interface Card { eyebrow: string; title: string; summary: string; image?: string; fit?: 'cover' | 'contain' }
 
-const publicImage = (path: string): string | undefined => {
+/** Any image under public/ (PNG, JPEG, WebP) as a PNG data URL that satori can draw. */
+const publicImage = async (path: string): Promise<string | undefined> => {
   const file = join(ROOT, 'public', path);
   if (!existsSync(file)) return undefined;
-  return `data:image/png;base64,${readFileSync(file).toString('base64')}`;
+  const png = await sharp(file).resize({ width: 1000, withoutEnlargement: true }).png().toBuffer();
+  return `data:image/png;base64,${png.toString('base64')}`;
 };
 const portrait = `data:image/jpeg;base64,${readFileSync(join(ROOT, 'src', 'assets', 'portrait.jpg')).toString('base64')}`;
-const PHASE = '/media/pendulum-lab/phase_portrait.png';
+const PHASE_FLOW = '/media/pendulum-lab/phase_flow.webp';
 
 const firstPng = (body: string | undefined): string | undefined => body?.match(/src="(\/media\/[^"]+\.png)"/)?.[1];
 const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s);
@@ -38,28 +45,31 @@ const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).replac
 export async function getStaticPaths() {
   const projects = await getCollection('projects');
   const chapters = await getCollection('chapters');
+  const phaseFlow = await publicImage(PHASE_FLOW);
   const cards: Array<{ params: { slug: string }; props: Card }> = [
-    { params: { slug: 'home' }, props: { eyebrow: 'Viktor Laurens De Groote · Brussels', title: 'Engineer in control, learning, perception and robotics.', summary: 'Identifying dynamics from data, estimating state in real time, and designing controllers you can trust. With a live pendulum.', image: publicImage(PHASE) } },
-    { params: { slug: 'about' }, props: { eyebrow: 'About', title: 'Viktor Laurens De Groote', summary: 'From the Lorenz attractor at sixteen to visual-inertial SLAM on building sites: control, learning, perception and robotics.', image: portrait } },
-    { params: { slug: 'projects' }, props: { eyebrow: 'Projects', title: 'Case studies', summary: 'Each project is a question, a method, and the results it found, shown in figures you can see and play with.', image: publicImage(PHASE) } },
-    { params: { slug: '404' }, props: { eyebrow: '404 · unstable equilibrium', title: 'This one fell over.', summary: 'The page you asked for is not a fixed point of this site.', image: publicImage(PHASE) } },
+    { params: { slug: 'home' }, props: { eyebrow: 'Brussels · Belgium', title: "Hi, I'm Viktor!", summary: "I'm fascinated by mathematics and the surprising things you can do with it.", image: portrait, fit: 'cover' } },
+    { params: { slug: 'about' }, props: { eyebrow: 'About', title: 'Viktor Laurens De Groote', summary: 'From the Lorenz attractor at sixteen to visual-inertial SLAM on building sites: control, learning, perception and robotics.', image: portrait, fit: 'cover' } },
+    { params: { slug: 'projects' }, props: { eyebrow: 'Projects', title: 'Case studies', summary: 'Each project is a question, a method, and the results it found, shown in figures you can see and play with.', image: phaseFlow, fit: 'cover' } },
+    { params: { slug: '404' }, props: { eyebrow: '404 · unstable equilibrium', title: 'This one fell over.', summary: 'The page you asked for is not a fixed point of this site.', image: phaseFlow, fit: 'cover' } },
   ];
   for (const p of projects) {
-    const cover = p.data.coverVideo?.replace(/\.mp4$/, '.png');
-    cards.push({ params: { slug: `projects/${p.id}` }, props: { eyebrow: `Project · ${p.data.date.getFullYear()}`, title: p.data.title, summary: p.data.summary, image: (cover && publicImage(cover)) || publicImage(PHASE) } });
+    // The project's hero frame, its card poster, or the phase flow, in that order.
+    const visual = (p.data.heroPoster && (await publicImage(p.data.heroPoster))) || (p.data.coverPoster && (await publicImage(p.data.coverPoster))) || phaseFlow;
+    cards.push({ params: { slug: `projects/${p.id}` }, props: { eyebrow: `Project · ${p.data.date.getFullYear()}`, title: p.data.title, summary: p.data.cardSummary ?? p.data.summary, image: visual, fit: 'cover' } });
   }
   for (const c of chapters) {
     const [projectId, chapterSlug] = c.id.split('/');
     const project = projects.find((p) => p.id === projectId);
     const num = String(c.data.number).padStart(2, '0');
-    cards.push({ params: { slug: `projects/${projectId}/${chapterSlug}` }, props: { eyebrow: `${project?.data.title ?? projectId} · ${c.data.number < 10 ? `Chapter ${num}` : 'Gallery'}`, title: c.data.title, summary: c.data.summary, image: publicImage(firstPng(c.body) ?? PHASE) } });
+    const figure = firstPng(c.body);
+    cards.push({ params: { slug: `projects/${projectId}/${chapterSlug}` }, props: { eyebrow: `${project?.data.title ?? projectId} · ${c.data.number < 10 ? `Chapter ${num}` : 'Gallery'}`, title: c.data.title, summary: c.data.summary, image: figure ? await publicImage(figure) : phaseFlow, fit: figure ? 'contain' : 'cover' } });
   }
   return cards;
 }
 
 const el =(type: string, style: Record<string, unknown>, children?: unknown, extra: Record<string, unknown> = {}) => ({ type, props: { style, children, ...extra } });
 
-function card({ eyebrow, title, summary, image }: Card) {
+function card({ eyebrow, title, summary, image, fit = 'cover' }: Card) {
   const long = title.length > 34;
   const mark = el('svg', { width: 44, height: 44 }, [
     el('line', {}, undefined, { x1: 22, y1: 7, x2: 32, y2: 31, stroke: C.fg, strokeWidth: 2.4, strokeLinecap: 'round' }),
@@ -68,7 +78,8 @@ function card({ eyebrow, title, summary, image }: Card) {
   ], { viewBox: '0 0 44 44' });
 
   return el('div', { width: W, height: H, display: 'flex', background: C.bg, color: C.fg, fontFamily: 'Plex', padding: 56 }, [
-    el('div', { display: 'flex', flexDirection: 'column', flex: 1, paddingRight: 48, justifyContent: 'space-between' }, [
+    // Fixed width: with flex: 1 the text column grew to its content and pushed the panel off the card.
+    el('div', { display: 'flex', flexDirection: 'column', width: W - 2 * 56 - 480 - 48, marginRight: 48, flexShrink: 0, justifyContent: 'space-between' }, [
       el('div', { display: 'flex', flexDirection: 'column' }, [
         el('div', { fontFamily: 'Mono', fontSize: 21, letterSpacing: 3, textTransform: 'uppercase', color: C.accent, marginBottom: 26 }, clamp(eyebrow, 46)),
         el('div', { fontSize: long ? 52 : 64, fontWeight: 600, lineHeight: 1.08, letterSpacing: -1.5, marginBottom: 24 }, clamp(title, 70)),
@@ -82,8 +93,8 @@ function card({ eyebrow, title, summary, image }: Card) {
         ]),
       ]),
     ]),
-    el('div', { display: 'flex', width: 480, height: H - 112, borderRadius: 18, border: `1px solid ${C.line}`, background: C.panel, overflow: 'hidden' },
-      image ? [el('img', { width: 480, height: H - 112, objectFit: 'cover' }, undefined, { src: image })] : []),
+    el('div', { display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxSizing: 'border-box', width: 480, height: H - 112, borderRadius: 18, border: `1px solid ${C.line}`, background: C.panel, overflow: 'hidden' },
+      image ? [el('img', { width: fit === 'contain' ? 448 : 480, height: fit === 'contain' ? H - 144 : H - 112, objectFit: fit }, undefined, { src: image })] : []),
   ]);
 }
 

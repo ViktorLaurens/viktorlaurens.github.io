@@ -19,6 +19,8 @@ const projects = defineCollection({
       heroVideo: z.string().optional(),
       heroPoster: z.string().optional(),
       heroAlt: z.string().optional(),
+      /** Shorter summary for the social preview card, where the full one would be cut off. */
+      cardSummary: z.string().optional(),
     }),
 });
 
