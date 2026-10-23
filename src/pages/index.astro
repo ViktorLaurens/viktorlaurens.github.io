@@ -56,17 +56,17 @@ const featured = projects.filter((p) => p.data.featured).slice(0, 3);
     </section>
   )}
 
-  <section class="section container">
+  <section class="section section--contact container">
     <div class="contact">
-      <div>
+      <div class="contact__text">
         <h2>Let's talk.</h2>
-        <p class="lede">Open to research collaborations and roles in control, learning and robotics.</p>
+        <p class="contact__lede">Open to research collaborations and roles in control, learning and robotics.</p>
       </div>
       <div class="contact__links">
-        <a class="btn btn--primary" href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" brand={false} />Email me</a>
-        <a class="btn" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener"><ContactIcon name="linkedin" />LinkedIn</a>
-        <a class="btn" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener"><ContactIcon name="github" />GitHub</a>
-        <a class="btn" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" />CV</a>
+        <a class="btn btn--primary contact__email" href="mailto:viktor.degroote@gmail.com"><ContactIcon name="email" brand={false} />Email me</a>
+        <a class="btn contact__alt" href="https://www.linkedin.com/in/viktor-laurens-de-groote/" target="_blank" rel="noopener"><ContactIcon name="linkedin" />LinkedIn</a>
+        <a class="btn contact__alt" href="https://github.com/ViktorLaurens" target="_blank" rel="noopener"><ContactIcon name="github" />GitHub</a>
+        <a class="btn contact__alt" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf"><ContactIcon name="cv" />CV</a>
       </div>
     </div>
   </section>
@@ -105,8 +105,20 @@ const featured = projects.filter((p) => p.data.featured).slice(0, 3);
   .start a span { color: var(--fg-faint); transition: transform .2s var(--ease), color .2s var(--ease); }
   .start a:hover { color: var(--accent); border-bottom-color: var(--accent); }
   .start a:hover span { color: var(--accent); transform: translateX(3px); }
-  .contact { display: grid; gap: var(--space-8); align-items: center; padding: var(--space-12) var(--space-8); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); }
-  @media (min-width: 820px) { .contact { grid-template-columns: 1.3fr 1fr; } }
-  .contact__links { display: flex; gap: var(--space-3); flex-wrap: wrap; }
-  @media (min-width: 820px) { .contact__links { justify-content: flex-end; } }
+  /* Contact card: text on the left, one primary action above three equal secondary ones. */
+  .section--contact { padding-bottom: var(--space-12); }
+  .contact { display: grid; gap: var(--space-8); align-items: center; padding: var(--space-10, 2.5rem) var(--space-8); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); }
+  @media (min-width: 860px) { .contact { grid-template-columns: minmax(0, 1fr) minmax(0, 24rem); gap: var(--space-12); padding: var(--space-12); } }
+  .contact__text { display: grid; gap: var(--space-3); }
+  .contact__lede { color: var(--fg-muted); font-size: clamp(1.05rem, 1rem + .3vw, 1.2rem); line-height: 1.5; max-width: 34ch; text-wrap: balance; }
+  .contact__links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+  .contact__links :global(.btn) { justify-content: center; gap: .55em; padding: .8em .6em; border-radius: 10px; }
+  .contact__email { grid-column: 1 / -1; padding-block: .95em; font-size: 1.02rem; }
+  .contact__alt { background: var(--bg); }
+  .contact__alt:hover { background: var(--accent-soft); }
+  @media (max-width: 480px) {
+    .contact { padding: var(--space-8) var(--space-6); }
+    .contact__links { gap: var(--space-2); }
+    .contact__links :global(.btn.contact__alt) { font-size: .9rem; padding-inline: .4em; gap: .4em; }
+  }
 </style>
