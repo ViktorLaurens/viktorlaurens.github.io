@@ -25,7 +25,12 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path === href 
         {links.map((l) => (
           <li><a href={l.href} aria-current={isActive(l.href) ? 'page' : undefined}>{l.label}</a></li>
         ))}
-        <li><a class="nav__cv" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf">CV <span aria-hidden="true">↓</span></a></li>
+        <li>
+          <a class="nav__cv" href="/cv.pdf" download="Viktor_Laurens_De_Groote_CV.pdf" aria-label="Download CV (PDF)" title="Download CV (PDF)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M4.5 16.5v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2" /></svg>
+            <span>CV</span>
+          </a>
+        </li>
         <li>
           <button class="search" type="button" data-open-palette aria-label="Search the site (Ctrl K)" title="Search · Ctrl K">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
@@ -107,7 +112,10 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path === href 
   .nav__links a { text-decoration: none; color: var(--fg-muted); font-weight: 500; font-size: .95rem; padding: .3em 0; border-bottom: 1.5px solid transparent; }
   .nav__links a:hover { color: var(--fg); }
   .nav__links a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); }
-  .nav__links a.nav__cv { font-family: var(--font-mono); font-size: .85rem; border: 1px solid var(--line-strong); border-radius: 6px; padding: .35em .7em; }
+  /* One box that never wraps, whatever the font size: inline-flex + nowrap. */
+  .nav__links a.nav__cv { display: inline-flex; align-items: center; gap: .4em; white-space: nowrap; flex-shrink: 0; font-family: var(--font-mono); font-size: .85rem; line-height: 1; border: 1px solid var(--line-strong); border-radius: 6px; padding: .45em .7em; }
+  .nav__cv svg { width: 1.05em; height: 1.05em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .nav__links li { flex-shrink: 0; }
   .nav__links a.nav__cv:hover { border-color: var(--accent); color: var(--accent); }
   .search { display: inline-flex; align-items: center; gap: .45em; height: 34px; padding: 0 .55em; border-radius: 999px; border: 1px solid transparent; background: transparent; cursor: pointer; color: var(--fg-muted); }
   .search:hover { color: var(--fg); border-color: var(--line-strong); }
@@ -123,8 +131,12 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path === href 
   @media (max-width: 600px) {
     .nav__in { flex-wrap: wrap; height: auto; padding-block: .7rem .55rem; row-gap: .35rem; }
     .nav__in nav { width: 100%; }
-    .nav__links { gap: .9rem; }
+    /* Tight gaps so a phone with a larger system font still fits one row; wrap rather than scroll if not. */
+    .nav__links { gap: clamp(.3rem, 1.8vw, .9rem); flex-wrap: wrap; row-gap: .3rem; }
+    .nav__links a { font-size: .92rem; }
+    .nav__links a.nav__cv { padding: .45em .55em; }
     .nav__links li:last-child { margin-left: auto; }
-    .theme { margin-right: -8px; }
+    .search { height: 32px; padding: 0 .35em; }
+    .theme { width: 32px; height: 32px; margin-right: -8px; }
   }
 </style>
