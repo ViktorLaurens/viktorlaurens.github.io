@@ -131,11 +131,11 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path === href 
   @media (max-width: 600px) {
     .nav__in { flex-wrap: wrap; height: auto; padding-block: .7rem .55rem; row-gap: .35rem; }
     .nav__in nav { width: 100%; }
-    /* Tight gaps so a phone with a larger system font still fits one row; wrap rather than scroll if not. */
-    .nav__links { gap: clamp(.3rem, 1.8vw, .9rem); flex-wrap: wrap; row-gap: .3rem; }
+    /* Spread the items evenly over the row. The minimum gap is tight so a phone with a larger
+       system font still fits one row; wrap rather than scroll if not. */
+    .nav__links { justify-content: space-between; gap: .3rem; flex-wrap: wrap; row-gap: .3rem; }
     .nav__links a { font-size: .92rem; }
     .nav__links a.nav__cv { padding: .45em .55em; }
-    .nav__links li:last-child { margin-left: auto; }
     .search { height: 32px; padding: 0 .35em; }
     .theme { width: 32px; height: 32px; margin-right: -8px; }
   }
