@@ -5,6 +5,7 @@
  */
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { publishedChapters } from '../../lib/chapters';
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, existsSync } from 'node:fs';
@@ -44,7 +45,7 @@ const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).replac
 
 export async function getStaticPaths() {
   const projects = await getCollection('projects');
-  const chapters = await getCollection('chapters');
+  const chapters = await publishedChapters();
   const phaseFlow = await publicImage(PHASE_FLOW);
   const cards: Array<{ params: { slug: string }; props: Card }> = [
     { params: { slug: 'home' }, props: { eyebrow: 'Brussels · Belgium', title: "Hi, I'm Viktor!", summary: "I'm fascinated by mathematics and the surprising things you can do with it.", image: portrait, fit: 'cover' } },

@@ -4,6 +4,7 @@
  */
 import type { APIRoute } from 'astro';
 import { getCollection, render } from 'astro:content';
+import { publishedChapters } from '../lib/chapters';
 
 export interface SearchEntry {
   /** What is shown in bold. */
@@ -38,7 +39,7 @@ export const GET: APIRoute = async () => {
     }
   }
 
-  const chapters = (await getCollection('chapters')).sort((a, b) => a.data.number - b.data.number);
+  const chapters = (await publishedChapters()).sort((a, b) => a.data.number - b.data.number);
   for (const c of chapters) {
     const [projectId, slug] = c.id.split('/');
     const project = projects.find((p) => p.id === projectId);

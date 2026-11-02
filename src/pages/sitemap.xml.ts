@@ -4,12 +4,13 @@
  */
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { publishedChapters } from '../lib/chapters';
 
 export const GET: APIRoute = async ({ site }) => {
   const base = site ?? new URL('https://viktorlaurens.github.io');
   const paths = ['/', '/projects/', '/about/'];
   for (const p of await getCollection('projects')) paths.push(`/projects/${p.id}/`);
-  for (const c of await getCollection('chapters')) {
+  for (const c of await publishedChapters()) {
     const [project, chapter] = c.id.split('/');
     paths.push(`/projects/${project}/${chapter}/`);
   }
