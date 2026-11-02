@@ -30,7 +30,7 @@ export const GET: APIRoute = async () => {
   const projects = (await getCollection('projects')).sort((a, b) => a.data.order - b.data.order);
   for (const p of projects) {
     const url = `/projects/${p.id}/`;
-    const soon = p.data.status === 'soon' ? ' coming soon teaser' : '';
+    const soon = p.data.status === 'soon' ? ' coming soon teaser' : p.data.status === 'wip' ? ' in progress under construction' : '';
     entries.push({ title: p.data.title, group: 'Projects', url, kind: 'page', keywords: p.data.tags.join(' ') + soon });
     const { headings } = await render(p);
     for (const h of headings.filter((h) => h.depth === 2)) {

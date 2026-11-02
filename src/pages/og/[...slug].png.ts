@@ -55,7 +55,7 @@ export async function getStaticPaths() {
   for (const p of projects) {
     // The project's hero frame, its card poster, or the phase flow, in that order.
     const visual = (p.data.heroPoster && (await publicImage(p.data.heroPoster))) || (p.data.coverPoster && (await publicImage(p.data.coverPoster))) || phaseFlow;
-    cards.push({ params: { slug: `projects/${p.id}` }, props: { eyebrow: p.data.status === 'soon' ? `Coming soon · ${p.data.date.getFullYear()}` : `Project · ${p.data.date.getFullYear()}`, title: p.data.title, summary: p.data.cardSummary ?? p.data.summary, image: visual, fit: 'cover' } });
+    cards.push({ params: { slug: `projects/${p.id}` }, props: { eyebrow: p.data.status === 'soon' ? `Coming soon · ${p.data.date.getFullYear()}` : p.data.status === 'wip' ? `In progress · ${p.data.date.getFullYear()}` : `Project · ${p.data.date.getFullYear()}`, title: p.data.title, summary: p.data.cardSummary ?? p.data.summary, image: visual, fit: 'cover' } });
   }
   for (const c of chapters) {
     const [projectId, chapterSlug] = c.id.split('/');

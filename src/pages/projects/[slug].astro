@@ -12,6 +12,7 @@ const { project } = Astro.props;
 const { Content, headings } = await render(project);
 const { title, summary, date, tags, repo, heroVideo, heroPoster, heroAlt, status, outline, outlineNote } = project.data;
 const soon = status === 'soon';
+const wip = status === 'wip';
 const toc = headings.filter((h) => h.depth === 2);
 const chapters = (await getCollection('chapters', (c) => c.data.project === project.id))
   .sort((a, b) => a.data.number - b.data.number);
@@ -25,8 +26,8 @@ const chapterSlug = (id: string) => id.split('/').pop();
       <img class="project__hero project__still" src={heroPoster} alt={heroAlt ?? title} width="960" height="540" />
     ) : null}
     <header class="project__head">
-      <p class="eyebrow eyebrow--accent">Project · {date.getFullYear()}{soon && ' · in progress'}</p>
-      <h1>{title} {soon && <span class="soon project__soon">Coming soon</span>}</h1>
+      <p class="eyebrow eyebrow--accent">Project · {date.getFullYear()}{(soon || wip) && ' · in progress'}</p>
+      <h1>{title} {(soon || wip) && <span class="soon project__soon">{soon ? 'Coming soon' : 'In progress'}</span>}</h1>
       <p class="lede">{summary}</p>
       <div class="project__meta">
         {tags.length > 0 && <div class="tags">{tags.map((t) => <span class="tag">{t}</span>)}</div>}
@@ -34,13 +35,20 @@ const chapterSlug = (id: string) => id.split('/').pop();
       </div>
     </header>
 
-    {soon && (
+    {(soon || wip) && (
       <aside class="notice" role="note">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
-        <p>
-          <strong>Under construction.</strong> The chapters are being written and checked. This page is the
-          overview; the full report, with its figures and animations, will appear here soon.
-        </p>
+        {soon ? (
+          <p>
+            <strong>Under construction.</strong> The chapters are being written and checked. This page is the
+            overview; the full report, with its figures and animations, will appear here soon.
+          </p>
+        ) : (
+          <p>
+            <strong>Under construction.</strong> The chapters below can be read, but they are still being
+            revised, and more are planned. Results and figures may change.
+          </p>
+        )}
       </aside>
     )}
 
