@@ -21,6 +21,12 @@ const projects = defineCollection({
       heroAlt: z.string().optional(),
       /** Shorter summary for the social preview card, where the full one would be cut off. */
       cardSummary: z.string().optional(),
+      /** 'soon': a teaser. The page shows the overview and the planned chapters, not links to them. */
+      status: z.enum(['published', 'soon']).default('published'),
+      /** The planned chapters of a teaser, shown as an outline. */
+      outline: z.array(z.object({ title: z.string(), summary: z.string() })).default([]),
+      /** Shown under the outline of a teaser, for the chapters still being planned. */
+      outlineNote: z.string().optional(),
     }),
 });
 

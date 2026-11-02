@@ -21,6 +21,7 @@
   --accent: var(--blue);
   --accent-fg: #06181d;
   --accent-soft: rgba(88, 196, 221, 0.12);
+  --soon: var(--yellow);
   --field: rgba(88, 196, 221, 0.22);
   --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 40px rgba(0,0,0,.35);
 
@@ -48,6 +49,7 @@
   --accent: #1a8ba3;
   --accent-fg: #ffffff;
   --accent-soft: rgba(26, 139, 163, 0.1);
+  --soon: #8a6a00;
   --field: rgba(26, 139, 163, 0.25);
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px rgba(0,0,0,.08);
   color-scheme: light;

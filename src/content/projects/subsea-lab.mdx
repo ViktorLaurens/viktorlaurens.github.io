@@ -1,0 +1,63 @@
+---
+title: "Subsea Lab"
+summary: "Three questions only water asks. A study of an underwater vehicle with a robot arm at a seabed structure: where is safe when standing still is not an option, what the camera buys, and what may be learned inside the physics, measured on one fixed mission."
+date: 2026-10-21
+tags: [modelling, identification, estimation, perception, safety, learning, control]
+order: 3
+status: soon
+coverPoster: /media/subsea-lab/teaser.webp
+coverAlt: "The vehicle camera's view of a seabed structure: four square fiducial markers around a yellow grab handle, seen through slightly turbid water"
+heroPoster: /media/subsea-lab/teaser.webp
+heroAlt: "The vehicle camera's view of a seabed structure: four square fiducial markers around a yellow grab handle, seen through slightly turbid water"
+cardSummary: "Three questions only water asks: safety when the safe state moves, what the camera buys, and what may be learned inside the physics, on one underwater manipulation mission."
+outline:
+  - title: "The vehicle and the arm in three dimensions"
+    summary: "A BlueROV2 Heavy with a four-joint arm, from first principles; why a sideways reach rolls and turns the vehicle."
+  - title: "Safe active identification"
+    summary: "Experiments designed to learn the most about the vehicle without ever leaving a safe box in the current."
+  - title: "Navigation on SE(3)"
+    summary: "Where the vehicle is, from acoustic fixes and a Doppler log, and how well the tip can know it."
+  - title: "What the camera sees"
+    summary: "A pose relative to the structure from fiducials, with an error bound that grows with turbidity."
+  - title: "Whole-body control, and who should move"
+    summary: "Autopilot, task priority and a whole-body NMPC on the same mission, and the grasp as a contact."
+  - title: "Safety when the safe state moves"
+    summary: "Barrier functions on a keep-out zone when the fallback is itself a controller fighting a current."
+  - title: "Learning inside the physics"
+    summary: "Learned models that keep the structure of hydrodynamics, and what that buys inside an optimizer."
+  - title: "Adapting after the grasp"
+    summary: "Finding the weight of an object nobody measured, in seconds, from the vehicle's own sensors."
+  - title: "How much model does safe underwater manipulation need"
+    summary: "The gallery: model-based controllers against reinforcement learning, on currents and objects none was told about."
+  - title: "Finding out that the model is wrong"
+    summary: "Monitors that catch a gust or a heavier object before the error can hurt."
+---
+
+## Why under water
+
+[Pendulum Lab](/projects/pendulum-lab/) ended on an underwater manipulator in the plane. This
+project takes the same discipline into three dimensions and into water, where three things
+change that no pendulum and no fixed-base arm can ask:
+
+1. **Where is safe, when standing still is not an option?** The current never stops and
+   thrust is finite, so the safe state is not standing still but a controller holding
+   station. The safe set depends on the current and on how well the current is known.
+2. **What does the camera buy?** The structure is in view. A pose relative to it, with an
+   error bound that grows with turbidity, can replace a coarse acoustic fix for the one thing
+   that matters: not touching the structure while reaching it.
+3. **What may be learned inside the physics?** Hydrodynamics dissipate energy and added mass
+   is symmetric. A learned model that keeps that structure cannot create energy, and what
+   that buys inside an optimizer is measurable.
+
+## One mission, never widened
+
+Every chapter flies the same mission. A BlueROV2 Heavy with a four-joint arm, in a current
+with gusts, next to a seabed structure with a keep-out zone, approaches, holds station,
+reaches a handle, grasps an object of unknown mass, buoyancy and drag, lifts it clear and
+carries it back, without entering the keep-out zone.
+
+## How it is made
+
+The same way as Pendulum Lab: one system, one fixed task, every claim with a figure.
+Everything is Python, with MuJoCo for the contact and the camera; every number comes from the
+same code, and the results come from simulation.
