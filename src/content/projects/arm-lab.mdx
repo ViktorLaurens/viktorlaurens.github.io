@@ -1,0 +1,75 @@
+---
+title: "Arm Lab"
+summary: "From following a trajectory to choosing one. A long-form study of robot arms, from tracking control to motion planning for one and several manipulators: planners that are fast, complete and safe by construction, with learning kept inside convex corridors."
+date: 2026-10-21
+tags: [control, planning, safety, learning, multi-robot]
+order: 2
+status: soon
+coverVideo: /media/arm-lab/teaser.mp4
+coverPoster: /media/arm-lab/teaser.webp
+coverAlt: "Two Franka Panda arms reaching for their targets while a person, shown as a red ball, passes between them"
+heroPoster: /media/arm-lab/teaser.webp
+heroAlt: "Two Franka Panda arms reaching for their targets while a person, shown as a red ball, passes between them"
+cardSummary: "From following a trajectory to choosing one: motion planning for one and several robot arms that is fast, complete and safe by construction."
+outline:
+  - title: "The manipulator as a dynamical system"
+    summary: "The Panda's equations of motion, checked against MuJoCo; energy, passivity and what can be identified."
+  - title: "Following a trajectory in joint space"
+    summary: "From PD with gravity compensation to computed torque, MPC, adaptive and learning-based control under an unknown payload."
+  - title: "Following the hand: task space"
+    summary: "Resolved rate, operational space and impedance control, and several tasks at once."
+  - title: "Touching the world: force and contact"
+    summary: "A probe on a surface the map got wrong: impedance, admittance, hybrid force/position control and energy tanks."
+  - title: "Which trajectory? A history of motion planners on one scene"
+    summary: "Exact search, potential fields, PRM, RRT-Connect and trajectory optimisation, benchmarked on one cell."
+  - title: "One arm in a graph of convex sets"
+    summary: "Planning as one convex program over a cover of free space, against a sampling planner."
+  - title: "Planning around moving obstacles"
+    summary: "Replanning around a person with a safety certificate, in a loop that never waits for the planner."
+  - title: "Corridors and feedback"
+    summary: "A region of free space as an invariant set, held by a barrier-function shield at 1 kHz."
+  - title: "Two arms, one cell, no central planner"
+    summary: "Each arm plans alone in the half of the cell it owns, and the arms hand space over by a protocol."
+  - title: "Learning inside the corridor"
+    summary: "Reinforcement learning behind the shield: what the policy adds and where it must not be trusted."
+  - title: "One safety layer for everything"
+    summary: "Two arms, a person walking past and pushes, all held by one layer that certifies every plan."
+  - title: "Learning to be less timid"
+    summary: "Tighter bounds on how people move, learned from data, and what they give back."
+  - title: "A shield that learns the arm"
+    summary: "A safety shield whose margin shrinks as it identifies the payload in the gripper."
+outlineNote: "Further chapters on safe exploration, contact without harm and certificates for every returned plan are being planned."
+---
+
+## Why arms
+
+Control answers one question: given a trajectory, make the system follow it.
+[Pendulum Lab](/projects/pendulum-lab/) ended there. For a robot arm the question becomes
+*which trajectory*, under constraints that control never had to think about: the arm must not
+hit the table, the bin, the person or the other arm. That is motion planning. It sits above
+control, it is global and combinatorial where control is local and continuous, and the field
+has answered it in a dozen ways over forty years, each with its own way of failing.
+
+This project starts where the pendulum stopped, with the arm as a dynamical system and the
+controllers that make it follow a path, and then asks what manipulators still cannot do in
+practice:
+
+1. **Replan in milliseconds in a changing scene, with guarantees.** Safety comes from staying
+   inside convex regions of free space, enforced at 1 kHz; the planner searches over those
+   regions to find a good route; learning chooses the behaviour, free to be imperfect because
+   the layer beneath it is not.
+2. **Know when a plan is wrong.** Certificates on the regions and on every returned plan.
+3. **Close the loop.** Plans become corridors, followed by controllers with a stated
+   disturbance bound.
+4. **Coordinate several arms without a central planner.** Each arm plans on its own clock and
+   treats the other's committed plan as an obstacle whose motion is known.
+
+The goal for the later chapters is a robot that becomes bolder as it learns, without becoming
+less safe.
+
+## How it is made
+
+The same way as Pendulum Lab: one scene, one storyline, every claim with a figure. Everything
+is Python, with MuJoCo for the physics and Drake for the convex planning; every figure and
+animation is regenerated from the same code, and the results come from simulation. It builds
+on my master's thesis on multi-robot motion planning.
