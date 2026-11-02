@@ -1,0 +1,192 @@
+---
+project: subsea-lab
+number: 8
+title: "Adapting after the grasp: physics, structure, or context"
+summary: "Physics, structure or context: four adapters on a stream from the raw sensors, on objects inside and outside a training distribution, and inside the NMPC."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 7 ended on the object. Nothing trained on one object knows the next; the three
+numbers that explain the residual can be re-fitted in two seconds; a network of thousands
+cannot. That was shown offline, on two seconds of data, with the true accelerations. This
+chapter does it the way a vehicle would have to: while carrying the object, ten times a
+second, from the raw sensors, with the controller waiting for the answer. It is the
+learning-versus-physics debate the PhD call sits in, with three kinds of adaptation on one
+clock, and the question is what each gets right, how fast, with how much data, and how it
+fails on an object outside anything it was prepared for.
+
+The code is in `src/subsea_lab/adaptation.py`; the numbers
+come from `scripts/evaluate_adaptation.py`.
+
+## 8.1 The stream
+
+The adapters never see the truth. After the grasp, at $100\ \text{Hz}$, they see chapter 2's sensors:
+the velocities from the DVL at 1 cm/s of noise, the rates from the gyros, the attitude at
+$0.3^\circ$, the joint angles and rates from the encoders; and they know the wrench the mixer
+believed it delivered, lagged through the identified thruster dynamics as chapter 2 did.
+Every tenth of a second one **sample** is made of the last ten measurements: the state at the
+instant with its velocities averaged over the last five, the acceleration as the difference
+of the two half-window means, and the residual of chapter 7, the force the designer's model
+cannot explain, computed from them. The accelerations are the price: a centimetre per second
+of velocity noise differenced over 50 ms is $0.2\ \text{m/s}^2$ of acceleration noise, and through the
+vehicle's mass that is 3 N in surge and sway and 4.3 N in heave, sample to sample, on a
+residual whose true heave is 6.9 N. Chapter 2 measured this cost offline (regression biased
+by half on the added masses); here it is what every adapter has to live with.
+
+The objects: a **training distribution** of 24, with mass uniform in 0.2 to 1.6 kg and volume
+uniform in 0.05 to 0.5 L, so weights in water from 0.8 to 14.5 N, each flown through the
+mission once by chapter 5's station controller with its own current and noise; and six
+**test objects**, three inside that range (0.5, 1.0 and 1.4 kg) and three outside it: 2 kg
+(13.7 N), 3 kg (20.6 N) and a buoyant 0.2 kg body of 0.4 L (2.0 N upward, lighter than the water
+it displaces, a sign the training set never contains). Each adapter is scored one step ahead:
+at every sample it predicts the residual at the true state from what it has learned from the
+measured samples before, then sees the new one. The error is chapter 7's ratio, the
+prediction's error over the residual's own size.
+
+## 8.2 Three ways to learn an object, and a fourth
+
+**Three numbers.** Chapter 7's weight, mass and drag at the jaws, by recursive least squares
+on the stream: each sample gives ten equations in three unknowns, weighted by the residual's
+scale per coordinate; the prior is no object; a forgetting factor of 0.98 gives the estimate
+a memory of five seconds so that the grasp's transient fades, and the covariance is capped at
+the prior so that it cannot wind up in a direction nothing excites (the drag, while the
+vehicle hovers). The mass and the drag are kept non-negative; the weight may have either
+sign. Chapter 9's winner, carried to three dimensions and to a stream of sensor noise. The
+plan asked for four parameters; the fourth, an added mass distinct from the mass, is not
+identifiable from the jaws' acceleration alone, since both multiply it, so it is three.
+
+**Structure, updated online.** Chapter 7's passive model as it was trained on the mission's
+object, with its three scalars replaced by the same least squares and its added-mass factor,
+joint inertias and dissipation network moved by five Adam steps on every sample since the
+grasp, each time one arrives. It stays passive at every step, by construction.
+
+**Context.** In-context adaptation: no parameter moves at test time. An encoder reads a
+summary of the last second of the stream (the mean of the features, the last features, the
+mean and the spread of the residuals, and how full the window is: 55 numbers) and gives a
+latent of four numbers; a head reads the state and the latent and gives the residual. Both
+are trained end to end, offline, on the 24 training flights, every sample of each flight an
+example with its own history, so the net sees the first second after a grasp as often as the
+steady carry. The RMA recipe, without the teacher. A first version fed the encoder the ten
+raw samples and learned the noise; the summary is what made it learn the object.
+
+**Hybrid.** The three numbers as the physics prior, and a context head trained on what they
+leave: the residual minus the numbers fitted on each training flight by least squares. At
+test, the numbers come from the recursion and the head adds its correction from the latent.
+
+<Figure src="/media/subsea-lab/adapt_curves.png" width={100} alt="Four panels of prediction error over residual on a logarithmic axis from 0.01 to 3, against time since the grasp from 0 to 30 seconds, for a 1 kilogram object inside the training range and 2 kilogram, 3 kilogram and buoyant objects outside it. On 1 kilogram the fixed numbers of chapter 7 sit at 2 percent, the online numbers and the structured model fall from 1 to below 10 percent by 10 seconds and to 3 percent by 30, the context and hybrid hover between 10 and 40 percent. On 2 kilograms the fixed numbers stay at 50 percent, the online numbers and structured model drop under 10 percent within 2 seconds and reach 2 to 3 percent, the context and hybrid settle near 10 to 15 percent. On 3 kilograms the numbers and structured model reach 5 percent by 4 seconds and drift back to 20, the context and hybrid oscillate around 50 to 100 percent with the fixed line. On the buoyant object the fixed numbers are above 300 percent, the online numbers go from 100 percent to under 10 by 5 seconds and again after 20, the structured model follows them with excursions, and the context and hybrid stay near 100 percent throughout">
+
+Each adapter's error against the true residual, one step ahead, over the time since the
+grasp: an object inside the training distribution and three outside it; the dotted line is
+20%
+
+</Figure>
+
+**What it shows.** Inside the training range the free adapters do what they were trained
+for, and no better: on the 1 kg object the context net is at 25% after five seconds and the
+hybrid at 22%, where chapter 7's numbers fitted to that very object sit at 2% and the online
+numbers, starting from nothing, reach 7% (they need 5.5 s to get under 20%, slower than on
+the heavier objects because the 1 kg residual is small against the noise). On 1.4 kg all four
+adapters are under 20% within 2.5 s. Outside the range the kinds part. The three numbers
+reach 20% in 1.4 s on 2 kg, 2.3 s on 3 kg and 3.9 s on the buoyant object, and after five
+seconds average 3%, 18% and 18%; the structured model, whose scalars are the same recursion,
+follows them and then wanders as its network keeps moving on noisy samples (5%, 25%, 29%).
+The context net, which has never seen a weight above 14.5 N or below zero, answers 13% on
+2 kg (just past its edge), 67% on 3 kg and 113% on the buoyant object, worse than predicting
+nothing; the hybrid, which has the numbers to stand on, does not stand on them: its learned
+correction, trained on what the numbers left in-distribution, adds 12%, 60% and 96% out of
+it. The most that can be said for the latent is that it degrades gracefully near the edge
+of its distribution and not beyond it. That is not a property one can budget for.
+
+<Figure src="/media/subsea-lab/adapt_numbers.png" width={100} alt="Three panels over time since the grasp. Left, the weight in water the recursion believes for six objects against dotted true lines: each curve spikes in the first half second then settles on its dotted line within a few seconds, 2.9 newtons for 0.5 kilograms, 6.8 for 1, 9.6 for 1.4, 13.5 for 2 and minus 2 for the buoyant object, while the 3 kilogram curve settles at 20 then drifts up to 27 against a true 20.6. Middle, the mass at the jaws: every curve collapses to zero within two seconds against dotted true values of 0.2 to 3.5 kilograms. Right, the drag at the jaws: spikes to 60 and 160 kilograms per metre during the transients and the arm's motions, otherwise between zero and 20 with no settled value">
+
+What the recursion believes the object is: the weight in water (left), the mass at the jaws
+(middle) and the drag (right), against the truth
+
+</Figure>
+
+**What it shows.** The weight is found: within 1 to 2 N of the truth by two seconds for
+every object from the buoyant one to 2 kg, and on 3 kg within 1 N at five seconds before it
+drifts to 27 N, a third too much. The mass is never found. Every estimate collapses to zero
+within two seconds, for every object, though the true value runs from 0.2 to 3.5 kg: the
+regressor for the mass is the jaws' acceleration, which from these sensors is noise, and
+least squares with a noisy regressor is biased towards zero, chapter 2's errors-in-variables
+by another name. What the mass should have explained, the inertia of a 3 kg body swinging
+on the arm during the return, leaks into the weight, which is why the 3 kg curve drifts.
+The drag is not found either, but it does not matter: the jaws move at a few centimetres
+per second and the drag's force is below the noise. Three numbers, then, are really one
+number and two placeholders, and the one number is the one the controller needs.
+
+## 8.3 Inside the controller
+
+The adapters go inside chapter 7's NMPC, which now takes the model's parameters at every
+solve: the three numbers (the weight on the jaws' basis, the mass as an implicit added
+inertia, the drag), and for the context and hybrid models the latent, with the head's
+network inside the integrator. The retrieval is chapter 7's, 30 s from the grasp, carrying
+the mission's object, the 2 kg one and the buoyant one, but the adapter sees only the
+measured stream, made in the loop from the noisy sensors and the believed commands. The
+fixed numbers of chapter 7 are the baseline, right on 1 kg and wrong on the other two.
+
+<Figure src="/media/subsea-lab/adapt_nmpc.png" width={100} alt="Six panels over mission time from 32 to 62 seconds, three columns for the 1 kilogram, 2 kilogram and buoyant objects. Top, the tip's error from its reference: with 1 kilogram the fixed numbers and the online numbers peak near 19 centimetres at the grasp and settle to zero, the context net settles at 2 and the hybrid swings to 65 centimetres twice in the first ten seconds. With 2 kilograms all peak at 20 to 30 at the grasp; the online numbers reach 0.2, the fixed numbers stay at 1.5, the context at 1 and the hybrid swings to 65. With the buoyant object the fixed numbers peak at 41 and hold a standing 2 centimetre error, the online numbers stay under 7 and settle at 0.1, the context leaves the axis at 36 seconds and does not return, the hybrid swings to 95. Bottom, the weight the model believes against the dotted truth: the online numbers settle on 6.9, 13.7 and minus 2 newtons within two to five seconds after a spike in the first half second; the fixed numbers sit at 6.9 throughout; the hybrid's numbers overshoot to 22, 38 and 10 newtons and take twenty seconds to come back">
+
+The retrieval with each adapter inside the NMPC: the tip's error from its reference (top)
+and the weight the model believes against the truth (bottom), carrying the mission's object,
+a 2 kg one and a buoyant one
+
+</Figure>
+
+**What it shows.** With the object it was fitted on, the fixed numbers are the ceiling: tip
+2.9 cm rms, $1.8^\circ$ of pitch, 1.1 cm after five seconds; the online numbers, starting from
+nothing, match them (2.9 cm, 1.0 cm after five seconds) at the price of $5.8^\circ$ of pitch in
+the first second, while the estimate spikes to 13 N and back. With the 2 kg object the
+fixed numbers are wrong by 7 N, and the controller feels it: $16^\circ$ of pitch at the grasp and a
+standing error of 1.5 cm it never removes. The online numbers find the weight by three
+seconds (23 N at one second, 15 at two, 13.5 at five against 13.7 true) and remove it: 0.2 cm
+at the end against 1.5, the pitch $13.5^\circ$. With the buoyant object the fixed numbers are wrong
+by 9 N the other way and the controller is wrong with them: a 41 cm excursion at the lift,
+$16^\circ$ of pitch, a standing 2 cm. The online numbers find the sign in the first second
+(-1.5 N at one second, -2.0 at two, true -2.0) and the tip never leaves 7 cm: 0.9 cm rms,
+0.4 after five seconds, $3.7^\circ$ of pitch. Three numbers from the raw sensors, inside the
+optimizer, cost nothing on the known object and give back everything on the unknown one.
+
+The nets are a different story. The context net carries the 1 kg and 2 kg objects, with
+18 to $22^\circ$ of pitch, sixteen and four solves that did not converge and a standing error of
+2 to 4 cm, and on the buoyant object its latent leaves the region it was trained on, the
+pitch climbs for four seconds, the thrust saturates and the plant diverges 4.5 s after the
+grasp: chapter 9's failure in three dimensions, reproduced with a model that was at 13%
+error on a 2 kg object and had never been told what a buoyant one looks like. The hybrid is
+worse than both its parts on every object: 14 to 20 cm rms, 52 to $71^\circ$ of pitch, 22 to 32
+failed solves, and a weight estimate thrown to 22, 38 and 10 N by the correction's forces,
+which the recursion then has to unlearn over twenty seconds. The prior did not get to win,
+and the optimizer found the states where the correction was wrong. The solve times say the
+rest: 1.2 to 1.9 s per solve for the numbers, 6 to 21 s with a network inside, on a laptop
+running three retrievals at once; none of them real time, the networks by two orders.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 8.1 | the stream | ten times a second, from the raw sensors: 3 to 4 N of differenced noise per sample on a 7 N residual; 24 training objects from 0.8 to 14.5 N in water, six test objects, three of them outside |
+| 8.2 | four adapters | the three numbers by recursive least squares reach 20% in 1.4 to 5.5 s on every object, in and out of distribution, buoyant included; the structured model follows its scalars and wanders after; the context net works inside its range (13 to 25%) and fails outside (67%, 113%); the hybrid's learned correction only adds error; the weight is found, the mass never (errors in variables), the drag does not matter |
+| 8.3 | in the NMPC | the online numbers match the fixed ones on the known object (2.9 cm) and beat them on the unknown ones (2 kg: 0.2 cm standing error against 1.5; buoyant: 0.9 cm rms against 6.1, $3.7^\circ$ against $16^\circ$); the context net carries the trained objects with $20^\circ$ of pitch and diverges on the buoyant one; the hybrid is worse than both its parts everywhere; a network inside costs ten times the solve time |
+
+What we learned:
+
+- Out of distribution is where physics wins, and the mission is always out of distribution:
+  the object is the thing nobody measured. Three numbers by least squares adapt to a buoyant
+  body or one twice the heaviest trained in two to four seconds; a latent trained on 24
+  objects answers nonsense a few newtons past its edge, and gives no sign that it is.
+- A hybrid is not automatically better than its physics. A learned correction trained on
+  what the physics leaves in-distribution is a learned error out of it; the prior has to be
+  allowed to win, which means the correction needs its own coverage test (chapter 4's bound
+  on a learned model is the shape of it).
+- Adaptation from raw sensors finds the weight and not the mass. The differenced
+  acceleration is noise, and least squares on a noisy regressor shrinks what it multiplies;
+  the controller lives with the weight, which is what matters at a few centimetres per
+  second, and the inertia of a heavy object leaks into it.
+- Inside the optimizer the ranking does not change, it sharpens. Three numbers from the
+  sensors give the controller back everything the unknown object took, at no cost on the
+  known one; a latent trained on 24 objects diverges on the 25th kind; a hybrid gives the
+  optimizer a learned correction to exploit and it does. Chapter 7's warning was about
+  energy; this one is about distribution, and the object is always out of it.
+
+**Back to the [project page](/projects/subsea-lab/).**

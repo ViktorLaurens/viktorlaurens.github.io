@@ -1,0 +1,304 @@
+---
+project: subsea-lab
+number: 1
+title: "The vehicle and the arm in three dimensions"
+summary: "The vehicle and the arm in three dimensions: Fossen per body, Kane over the chain, a compiled CasADi twin; why yaw has no spring, why the textbook model is twice too fast, and which coefficients the tip is sensitive to."
+---
+import Figure from '../../../components/Figure.astro';
+
+pendulum-lab's chapter 9 built an underwater vehicle with a two-link arm in the vertical plane
+and found three things: the model is the first thing to fix and the last to trust, the estimate
+is the limit, and learning helps where it has structure to stand on. It also listed what the
+plane could not show: a full arm, a base free to roll and yaw, currents from any direction. This
+chapter builds that system, in three dimensions, and asks the first question every later chapter
+depends on: which of its many parameters does the task actually care about?
+
+The code is in `src/subsea_lab/uvms.py`; the numbers come from
+`scripts/evaluate_system.py`.
+
+## 1.1 The system
+
+The vehicle is a **BlueROV2 Heavy**, as in chapter 9, with the parameters identified by von
+Benzon, Sørensen, Uth, Ouerghi, Pedersen and Liniger (2022, Table A1): 13.5 kg, 13.4 litres of
+displaced water, and in each of its six degrees of freedom a linear and a quadratic drag and an
+added mass. The surge, heave and pitch entries are chapter 9's; sway, roll and yaw are new. Its
+eight T200 thrusters sit where the paper puts them: four vertical ones at the corners, four
+horizontal ones vectored at $45^\circ$ and 8.5 cm below the centre of gravity, their lines of
+thrust passing a few centimetres from it, which is all the yaw authority the vehicle has.
+
+The arm is sized like a **Reach Alpha 5**: 1.36 kg in air, 0.9 kg in water, 360 mm of reach,
+40 mm across, five functions. Four of them are joints, the fifth the jaws:
+
+| joint | turns about | link that follows | length | torque limit |
+|---|---|---|---|---|
+| azimuth | the vehicle's $z$ axis, at the mount | the housing | 0 | 4 N m |
+| shoulder | $y$ | upper arm | 15 cm | 9 N m |
+| elbow | $y$ | forearm | 14 cm | 5 N m |
+| wrist roll | the forearm's axis | the jaws | 6 cm | 0.6 N m |
+
+The reach and the masses are the datasheet's; the link lengths, the torque limits (from lifting
+2 kg at full reach; the wrist's is published) and the joint ranges are choices. With the azimuth
+and the wrist locked at zero, the shoulder and elbow move in the vehicle's vertical plane and the
+forearm and jaws stay aligned: a 0.15 m and a 0.20 m link, chapter 9's arm. That limit is the
+regression test of everything below.
+
+<Figure src="/media/subsea-lab/sys_sketch.png" width={100} alt="Three orthographic views of the vehicle as a wireframe box, 46 by 34 by 25 centimetres, with eight red thruster positions and arrows along their thrust, a teal square for the foam ahead of the centre of gravity, and the arm under the bow in three poses: folded into a V when stowed (grey), straight out ahead (blue), and straight out to starboard (dashed yellow)">
+
+Side, top and front views: the frame, the eight thrusters (arrows along positive thrust), the
+foam that trims the vehicle, and the arm stowed, out ahead and out to the side
+
+</Figure>
+
+Ten degrees of freedom and twenty states, against chapter 9's five and ten. The vehicle's pose
+is its position in the world (north, east, down) and a unit quaternion; the velocities are
+Fossen's: the vehicle's twist in its own frame, $\boldsymbol\nu = (u, v, w, p, q, r)$, and the
+four joint rates. A quaternion and a body-frame twist have no singular attitude, which chapter 9
+needed: its nominal vehicle tumbled through $500^\circ$ of pitch.
+
+## 1.2 The equations
+
+Every body (the vehicle, the three links with mass, an object in the jaws) has a twist
+$\boldsymbol\nu_b$ in its own centre-of-gravity frame, found from the vehicle's twist and the
+joint rates by walking down the chain:
+
+$$
+\boldsymbol\nu_b = J_b(\mathbf q) \thinspace \boldsymbol\zeta,
+\qquad
+\dot{\boldsymbol\nu}_b = J_b \thinspace \dot{\boldsymbol\zeta} + \boldsymbol\kappa_b(\mathbf q, \boldsymbol\zeta),
+$$
+
+with $\boldsymbol\zeta = (\boldsymbol\nu, \dot{\mathbf q}_{\mathrm{arm}})$ the ten quasi-velocities, $J_b$ a $6 \times 10$ matrix and $\boldsymbol\kappa_b$ the part of the acceleration that
+the velocities alone produce (Featherstone's recursion, one joint at a time). In its own frame
+each body's mass, **including the added mass** of the water it drags along, is diagonal,
+$M_b = \mathrm{diag}(m_1, m_2, m_3, I_1, I_2, I_3)$, and Fossen's equations hold for it:
+
+$$
+M_b \thinspace \dot{\boldsymbol\nu}_b + C_b(\boldsymbol\nu_b) \thinspace \boldsymbol\nu_b = \boldsymbol\tau_b,
+\qquad
+C_b(\boldsymbol\nu) \thinspace \boldsymbol\nu = \begin{bmatrix} \boldsymbol\omega \times (M_{\mathrm{lin}} \mathbf v) \cr \boldsymbol\omega \times (M_{\mathrm{ang}} \boldsymbol\omega) + \mathbf v \times (M_{\mathrm{lin}} \mathbf v) \end{bmatrix}.
+$$
+
+The last term is the **Munk moment** of chapter 9, now about all three axes: a body easier to
+move along its axis than across it is turned across the flow. Kane's method (projecting every
+body's equation onto the quasi-velocities) gives the equations of the whole system,
+
+$$
+M(\mathbf q) \thinspace \dot{\boldsymbol\zeta} + \mathbf c(\mathbf q, \boldsymbol\zeta) = \sum_b J_b^\top \boldsymbol\tau_b + \begin{bmatrix} \mathbf 0 \cr \boldsymbol\tau_{\mathrm{arm}} \end{bmatrix},
+\qquad
+M = \sum_b J_b^\top M_b J_b,
+\qquad
+\mathbf c = \sum_b J_b^\top \left( M_b \boldsymbol\kappa_b + C_b \boldsymbol\nu_b \right).
+$$
+
+The forces $\boldsymbol\tau_b$: the thrusters on the vehicle, gravity at each centre of gravity,
+buoyancy at each centre of buoyancy (the vehicle's is 1 cm above its centre of gravity, a weak
+spring of 1.3 N m per radian in roll and pitch, and none at all in yaw), the foam, and drag on
+the velocity relative to the water: linear and quadratic on the vehicle, as identified; a
+cylinder's cross-flow drag on six strips along each link; a sphere's on the object. The thrusters
+follow the paper's third-order lag, about 0.1 s to respond, and Blue Robotics' measured 16 V
+curve per thruster: a dead band, a curved rise, 22% less in reverse. A linear mixer distributes
+a requested wrench over the eight thrusters through the allocation matrix, believing them linear.
+A uniform current enters through the drag only, a common simplification.
+
+Five tests check the equations:
+
+- **The Jacobians differentiate the kinematics.** Each $\boldsymbol\kappa_b$ equals
+  $\dot J_b \boldsymbol\zeta$ with $\dot J_b$ from finite differences, at random states, to
+  $10^{-6}$.
+- **What must be conserved, is.** With no drag and every body neutrally buoyant at its own centre,
+  the joint torques are internal: the system's momentum stays constant while the arm swings
+  (to $10^{-6}$), the kinetic energy rises by exactly the torques' work (to $10^{-3}$), and
+  stays constant once they stop (to $10^{-5}$).
+- **The planar limit is chapter 9.** Trimming the stowed system asks for 1.02 litres of foam
+  23.8 cm ahead of the centre of gravity, chapter 9's numbers; with the joints unpowered the arm
+  hangs down and trims the vehicle $11.68^\circ$ nose up, against chapter 9's $11.7^\circ$; and
+  nothing leaves the plane.
+- **It matches the paper.** At full thrust, with the attitude held, the vehicle reaches the
+  published 0.72 m/s forward and 0.71 m/s down, within 0.01 m/s.
+- **The thrusters are the paper's.** The mixer's limits come out at 85 N of surge and sway,
+  120 N of heave and 14.4 N m of pitch; a request of 5 N falls into the dead band and delivers
+  nothing; pushing down delivers 93 N instead of 120.
+
+One evaluation of the dynamics takes about 2 ms in NumPy, ten times chapter 9's: four links
+instead of two, six-dimensional twists, and a chain walked in Python. A simulated second costs
+about a second. That is enough for this chapter and not for the ones that fit models by replaying
+them thousands of times; section 1.6 builds the compiled twin that is.
+
+## 1.3 Floating with an arm, in three dimensions
+
+Thrusters off, the arm goes out over one second, holds for seven, and comes back. Twice: straight
+ahead, as in chapter 9, and straight out to starboard, which chapter 9 could not do.
+
+<Figure src="/media/subsea-lab/sys_coupling.png" width={100} alt="Six panels. Top left, the arm out ahead: the pitch dips to minus 21 degrees, holds at minus 18 while the arm is out, and returns to about plus 1 after the arm comes back; roll and yaw stay at zero. Bottom left: the vehicle moves less than a centimetre north and less than a centimetre in depth. Top middle, the arm out to starboard: the roll rises to 36 degrees and holds at 27, the pitch rises to plus 10 nose up, and the yaw falls to minus 24 degrees and stays there while the arm is out, ending at minus 2 after it comes back. Bottom middle: the vehicle drifts about 1.5 centimetres north, 5 centimetres east and 2 centimetres down. Top right, pitch for two more experiments: with the arm limp it rises to plus 11.7 degrees and stays; holding a 1 kilogram object straight ahead it dips to minus 50 and settles at minus 41. Bottom right: with the object the vehicle sinks steadily, 2.7 metres in 17 seconds">
+
+Thrusters off. Left: the arm out ahead and back (grey bands: the arm moves). Middle: out to
+starboard and back. Right: the arm limp, and holding a 1 kg object
+
+</Figure>
+
+| experiment | pitch | roll | yaw | the vehicle moves |
+|---|---|---|---|---|
+| the arm out ahead | dips to $-21.4^\circ$, holds $-17.7^\circ$ | 0 | 0 | 0.8 cm forward, 0.5 cm in depth |
+| the arm out to starboard | $+10.4^\circ$, nose up | peaks $36.1^\circ$, holds $26.7^\circ$ | $-23.0^\circ$ while out, $-1.9^\circ$ after | 2 cm, 5 cm to the side, 2 cm down |
+| the arm limp | $+11.7^\circ$ | 0 | 0 | |
+| holding 1 kg ahead | dips to $-50.5^\circ$, settles $-40.9^\circ$ | 0 | 0 | sinks 2.7 m in 17 s |
+
+What it shows:
+
+- **Ahead, it is chapter 9.** The vehicle pitches nose down and barely moves; the limp arm and
+  the 1 kg object give chapter 9's numbers ($11.7^\circ$ nose up; $-39^\circ$ and 3.2 m in 20 s
+  there, $-41^\circ$ and 2.7 m in 17 s here). The steady pitch while the arm is held depends on
+  how hard the servo holds the arm against its own weight (chapter 9 reported $-15.3^\circ$ with
+  its gains, this chapter's stiffer-damped servo gives $-17.7^\circ$); the equilibria that depend
+  on no controller agree to a tenth of a degree.
+- **To the side, the vehicle rolls, and lifts its nose.** The arm's weight is now beside the
+  centre of gravity, so the vehicle rolls $27^\circ$ toward it, and it is no longer ahead, so
+  the foam that was placed to balance it lifts the nose $10^\circ$. Whatever balances the arm
+  in one pose unbalances it in the next.
+- **Yaw has no spring.** Roll and pitch come back because buoyancy sits above gravity; nothing
+  in the water cares about the heading. Swinging the arm to starboard turns the vehicle
+  $23^\circ$ to port, by conservation of angular momentum, and it stays turned until the arm
+  comes back. Every arm motion is a heading change that only the thrusters can undo, and they
+  have 3.8 N m to do it with.
+- **The arm's reach is shorter than the arm.** Held straight ahead, the tip ends 24 cm from where
+  a fixed base would put it (chapter 9: 31 cm); to the side, the vehicle's roll takes it further.
+
+## 1.4 The model a designer would start with
+
+As in chapter 9, the controllers of later chapters are designed on a model and tested on the
+true system. The **nominal model** is what one could write down before any experiment: the same
+masses, geometry and added mass, the vehicle's drag from a drag coefficient of 1 on its projected
+areas (the paper's for surge and heave, the frame's dimensions for sway), no linear drag, a link
+drag coefficient of 1, and thrusters that deliver what they are asked, at once.
+
+<Figure src="/media/subsea-lab/sys_gap.png" width={100} alt="Four panels. Full surge thrust with the attitude held: the true system settles at 0.73 metres per second, on the measured 0.72; the nominal model at 1.39. Full sway thrust: 0.59 against 1.21. Full surge thrust with the pitch free: the true system pitches nose up past 90 degrees within two seconds and swings back; the nominal model pitches nose down past minus 89 and swings back; neither flies straight. Full sway thrust with the yaw free: the true vehicle turns 40 degrees one way while the thrust is on and only partly back; the nominal model turns 27 degrees one way, then 33 the other">
+
+Full thrust, the true system against the nominal model: surge and sway with the attitude held
+(left), and the pitch and the yaw with nothing holding them (right)
+
+</Figure>
+
+| | surge | sway | heave, down | yaw rate |
+|---|---|---|---|---|
+| true system | 0.73 m/s | 0.59 m/s | 0.71 m/s | $1.48\ \text{rad/s}$ |
+| nominal model | 1.39 m/s | 1.21 m/s | 1.08 m/s | $1.60\ \text{rad/s}$ |
+
+The gap is chapter 9's, in every direction: textbook drag is 3.6 times too low in surge, 2.3 in
+heave and now 4 in sway, so the nominal vehicle is twice as fast as the real one. And it is
+qualitatively wrong where it matters:
+
+- **Nothing flies straight.** Under full surge thrust with the pitch free, the true vehicle
+  pitches past vertical within two seconds: the horizontal thrusters push from below the centre
+  of gravity, the mixer cancels that with the vertical ones as if they were linear, and the pair
+  running in reverse delivers 22% less. The nominal model, delivering exactly what it is asked,
+  tumbles the other way, nose down: the stowed arm drags below the centre of gravity, the Munk
+  moment amplifies the tilt, and textbook drag is too weak to stop it. Chapter 9 saw both; a
+  controller must hold the pitch before the vehicle can move at all.
+- **The heading wanders.** Pushed sideways with the yaw free, the true vehicle turns $40^\circ$,
+  the nominal one $27^\circ$ and then $33^\circ$ back. There is no restoring moment in yaw;
+  what turns the vehicle (the thrusters' uneven reverse, the arm's added mass hanging ahead of
+  the centre, the Munk moment once it has any forward speed) differs between the two models,
+  and nothing turns it back in either.
+
+## 1.5 Which coefficients the motion is sensitive to
+
+Thirty-odd numbers describe this system's hydrodynamics. Chapter 2 will try to identify them
+from experiments, and chapter 7 to learn what the lumped ones miss. First: which of them matter
+for the motion a mission exercises? The true system flies a fixed fifteen-second programme, the
+kind an identification run would be: random thrust steps in surge, sway, heave and yaw up to
+60% of full, a roll and pitch autopilot holding the attitude, and the arm out to the side and
+back. Each coefficient in turn is changed by $\pm 20$% and the programme is flown again; the
+figure shows how much the vehicle's velocity and the tip's position change.
+
+<Figure src="/media/subsea-lab/sys_sensitivity.png" width={100} alt="Two horizontal bar charts on logarithmic axes, one bar pair (plus and minus 20 percent) per coefficient. Left, the root-mean-square change of the vehicle's velocity relative to half a metre per second: the largest, around 0.03 to 0.05, for quadratic surge, sway and yaw drag and for surge and sway added mass; around 0.02 for the arm's drag, quadratic heave drag, heave and yaw added mass; around 0.005 to 0.01 for linear surge and heave drag and the arm's added mass; below 0.003 for every roll and pitch coefficient; nothing for linear sway, roll and yaw drag, which the paper gives as zero. Right, the root-mean-square change of the tip's position in centimetres: 8 to 15 centimetres for quadratic yaw, sway and surge drag and surge and sway added mass; about 5 for the arm's drag; 1 to 3 for linear surge drag, quadratic heave drag, heave and yaw added mass, linear heave drag and the arm's added mass; below 0.2 for every roll and pitch coefficient">
+
+How much the fifteen-second programme changes when one coefficient changes by 20%: the
+vehicle's velocity (left) and the tip's position (right). Linear sway, roll and yaw drag are
+zero in the paper and stay zero
+
+</Figure>
+
+What it shows:
+
+- **The horizontal plane dominates.** The quadratic drag and the added mass in surge, sway and
+  yaw move the tip by 8 to 15 cm RMS over the programme; heave by 1 to 3 cm. The vehicle is
+  pushed around in the plane the mission happens in, and the coefficients of that plane set
+  where the tip goes.
+- **Yaw is the new one.** Quadratic yaw drag is the single most sensitive coefficient for the
+  tip. With no restoring moment and 3.8 N m of authority, how fast the vehicle stops turning is
+  what its heading, and so the tip's position, depend on. Chapter 9 had no yaw.
+- **Roll and pitch barely register.** Every roll and pitch coefficient changes the tip by less
+  than 2 mm: the autopilot holds the attitude, and a held axis hides its own dynamics. Chapter 9
+  found the same for pitch and concluded that those coefficients are the hardest to identify
+  from a stabilized run. Here they are also the least needed, as long as the autopilot works.
+- **The arm's drag matters more than the arm's added mass.** A 20% error in the links' drag
+  coefficient moves the tip 5 cm; in their added mass, 1 cm. Chapter 9 warned that a wrong arm
+  drag ends up in the vehicle's identified coefficients; this is how much is at stake.
+- **Linear drag is secondary.** Where the paper gives a linear term (surge, heave, pitch), its
+  20% is worth a tenth of the quadratic term's: at the speeds of a mission the vehicle is
+  quadratic.
+
+The ranking is for this programme, with the attitude held, and says nothing about a current
+(chapter 5) or about what a *filter* needs (chapter 6); it says what an experiment must excite
+to be worth flying, and that is chapter 2's question.
+
+## 1.6 Computation
+
+A simulated second costs about a second in NumPy and the sensitivity sweep above, forty-one
+flights of fifteen seconds, took nine minutes. Chapter 2's output-error fits replay the model
+hundreds of times per iteration, chapter 3's filter needs its Jacobians and chapter 5's NMPC
+needs both, ten times a second. So the same equations are written a second time, symbolically,
+in CasADi (`uvms_casadi.py`): the physics as one expression
+of six thousand nodes, generated as C and compiled (with zig, which installs with the project, so
+the build needs no compiler on the machine), the measured thruster curve wrapped around it as a
+table. A test evaluates both implementations on random states, with the thrusters mid-response,
+a payload and a current, and they agree to $10^{-10}$ on the state derivative, the mass matrix
+and an RK4 step, as chapter 9's batch model did. The symbolic model takes the twenty
+hydrodynamic coefficients of section 1.5 and the current as inputs, so chapter 2 can
+differentiate it with respect to what it identifies and chapter 3 with respect to what it
+estimates; its Jacobians match central differences to $10^{-11}$. `simulate` now runs on either.
+
+| one call | NumPy | CasADi, interpreted | CasADi, compiled |
+|---|---|---|---|
+| the state derivative | 1.6 ms | 82 µs | 48 µs |
+| one RK4 step | 8.5 ms | 240 µs | 64 µs |
+| a simulated second (200 steps and the controller) | 1.5 s | | 24 ms |
+| the five Jacobians (45 by 45 and the inputs) | | 10 ms | 2.5 ms |
+
+Thirty to sixty times faster, which is what chapters 2 and 5 need, and the Jacobians for free.
+Two costs are worth knowing. Compiling the model takes two seconds; compiling its Jacobians
+takes minutes, because their C is ten times the model's, so they are built on first use and
+cached. And at this size the time is no longer in the arithmetic: a compiled derivative and a
+compiled RK4 step (four derivatives) cost almost the same, and the simulated second is spent in
+the Python controller loop. The NumPy version stays: it is the one a reader can follow, and the
+one the twin is checked against.
+
+## Chapter summary
+
+The chapter built the plant of this project, a BlueROV2 Heavy with a four-joint arm free in six
+degrees of freedom, and found where the plane had hidden things:
+
+| | topic | what it showed |
+|---|---|---|
+| 1.1 | the system | ten degrees of freedom, twenty states; the paper's parameters and thrusters; the planar limit is chapter 9 |
+| 1.2 | the equations | Fossen per body, Kane over the chain, on quasi-velocities; momentum, work, the paper's speeds and chapter 9's equilibria all check |
+| 1.3 | floating with an arm | ahead, it is chapter 9; to the side, the vehicle rolls $27^\circ$, lifts its nose $10^\circ$ and turns $23^\circ$, and nothing turns it back |
+| 1.4 | the nominal model | twice too fast in every direction; neither it nor the true vehicle flies straight with the pitch free; the heading wanders in both |
+| 1.5 | sensitivity | the horizontal plane's drag and added mass set where the tip goes; yaw drag most of all; roll and pitch least, while an autopilot holds them |
+| 1.6 | computation | the same equations in CasADi, compiled, agree to $10^{-10}$ and run thirty to sixty times faster, with exact Jacobians |
+
+Three threads begin here:
+
+- **Yaw has no spring.** Roll and pitch right themselves; the heading does not. Every arm motion
+  is a heading change, the thrusters have 3.8 N m to undo it, and the coefficient the tip is most
+  sensitive to is the one that says how fast the vehicle stops turning. The arm's azimuth and the
+  vehicle's heading are one degree of freedom shared between two actuators; chapter 5 decides
+  who moves.
+- **What balances the arm in one pose unbalances it in the next.** The foam that trims the
+  vehicle with the arm ahead lifts its nose with the arm to the side. A floating base is not a
+  base; the arm's configuration is part of the vehicle's trim, and a controller holds both.
+- **The model is still the first thing to fix.** The textbook model is twice too fast, tumbles,
+  and turns the wrong way. The sensitivity sweep says which of its thirty coefficients an
+  experiment must get right, and which an autopilot will hide: that is where chapter 2 starts.
+
+**Back to the [project page](/projects/subsea-lab/).**
