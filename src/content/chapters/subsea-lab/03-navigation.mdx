@@ -1,0 +1,227 @@
+---
+project: subsea-lab
+number: 3
+title: "Navigation on SE(3), and its consistency"
+summary: "One manifold Kalman filter, two error maps: position, heading without a compass, the current and the force at the jaws, under a gust, an outage and a wrong heading; the tip floor the estimate sets."
+---
+import Figure from '../../../components/Figure.astro';
+
+pendulum-lab's chapter 9 ended on one sentence: *the estimate is the limit.* No controller
+placed the tip better than the vehicle knew where it was, and the safety filter kept its margin
+only where the estimator put the vehicle. Chapter 6 of this report will set barrier margins
+from a stated uncertainty, so the question this chapter asks is not only how good the estimate
+is but whether its stated uncertainty can be believed: which estimator is **consistent**, over
+the mission and under stress, and what floor its error puts under the tip.
+
+The code is in `src/subsea_lab/navigation.py`; the numbers
+come from `scripts/evaluate_navigation.py`.
+
+## 3.1 Two filters, one model, one difference
+
+Both estimators propagate the designer's model: the vehicle and the arm of chapter 1 with the
+coefficients chapter 2 identified from inside the box (the station-kept output-error fit), the
+thrusters' lag driven by the commands, and two things the model does not know as random walks,
+the current (three states) and a force at the jaws (three states, in the world frame): chapter
+9's fourteen states, now twenty-seven, with twenty-six degrees of freedom once the quaternion
+is counted as three. The sensors are the mission's: gyros and the gravity direction from the
+IMU at $100\ \text{Hz}$, the joint encoders and their rates, a DVL at $10\ \text{Hz}$ with
+1 cm/s of noise, a pressure sensor, and a USBL fix of the horizontal position once a second
+with 5 cm of noise. **No compass**: next to a steel structure a magnetometer is not trusted, so
+the heading has to come from the gyros and from how the DVL's velocity, integrated, disagrees
+with the USBL's fixes. The controller of chapter 5 acts on the estimate, as it will from now on.
+
+The two filters differ in one thing, how the error between the estimate and the truth is
+defined, and everything else follows from that choice:
+
+- **The error-state EKF** takes the position error in the world and the attitude error as a
+  small rotation in the body, $q = \hat q \otimes \exp(\delta\boldsymbol\theta)$; the rest is
+  additive.
+- **The invariant EKF** takes the attitude, the world velocity and the position together as
+  an element of the group $SE_2(3)$ and defines the error on the group,
+  $X = \exp(\boldsymbol\xi) \hat X$ (right-invariant), so that an attitude error carries the
+  position and velocity errors with it: $\mathbf p = \exp(\boldsymbol\xi_R) \hat{\mathbf p} + \boldsymbol\xi_p$.
+  For a vehicle driven by its IMU alone this makes the Jacobians independent of the estimate,
+  and the filter consistent through a wrong initial heading (Barrau and Bonnabel). Our dynamics
+  are not of that form: drag, added mass and the arm break the group structure, so the
+  invariance is not exact here. What survives is the error definition and its state-independent
+  coupling of attitude to position.
+
+Because the two share everything but the error map, they are one filter class with two
+`compose` and `difference` functions, and the Jacobians of the prediction and of every
+measurement are taken by finite differences of the compiled model *through* those maps. That
+costs 26 model evaluations per prediction, about 3 ms, and keeps the comparison honest: no
+hand-derived Jacobian can favour one filter.
+
+Consistency is measured as it is in the textbook: the **NEES**, the error weighted by the
+filter's own covariance, $\boldsymbol\epsilon^\top P^{-1} \boldsymbol\epsilon$ with
+$\boldsymbol\epsilon$ in the filter's own error coordinates, should average the number of
+states (26) and stay inside the 95% band of a $\chi^2_{26}$ (15 to 41); the **NIS** of each
+measurement should do the same with that measurement's dimension (the USBL's: 0.05 to 7.4).
+A filter whose NEES runs above the band is overconfident; one below it is wasting information.
+The mission is flown four more times under stress: a gust of 0.5 m/s across the vehicle for
+six seconds while it holds station, a USBL outage of twenty seconds across the reach and the
+grasp, a heading that starts $30^\circ$ wrong while the filter believes $10^\circ$, and the
+whole mission without a DVL. Each case is flown twice, with different noise and gusts; the
+numbers below are the means, and where the two flights differ by more than a tenth the range
+is given.
+
+## 3.2 The nominal mission
+
+<Figure src="/media/subsea-lab/nav_errors.png" width={100} alt="Four panels over the sixty-two seconds of the mission for both filters, which lie on top of each other. Top left, the position error on a logarithmic axis with each filter's one-sigma value: both fall from five centimetres to between one and three, with the sigma a sawtooth close above it that drops at every USBL fix. Top right, the heading error with its one-sigma band: both wander within four degrees in the first ten seconds while the band shrinks from ten degrees to under one, then settle at minus one to two degrees inside the band. Bottom left, the estimated current against the true gusty current, north and east components, with the one-sigma band: the estimates follow the true current within a few centimetres per second with a lag of a few seconds. Bottom right, the estimated downward force at the jaws: zero until the grasp at 32 seconds, then rising within two seconds to the object's weight in water of 6.9 newtons and staying there">
+
+The nominal mission: the position and heading errors with the filters' own uncertainty, the
+current found, and the force at the jaws found after the grasp
+
+</Figure>
+
+| | error-state EKF | invariant EKF |
+|---|---|---|
+| position error, RMS / worst | 2.5 cm / 5.5 cm | 2.4 cm / 5.5 cm |
+| heading error, RMS | $1.2^\circ$ | $1.2^\circ$ |
+| current error, RMS | 4.2 cm/s | 4.2 cm/s |
+| force at the jaws after the grasp (true weight 6.87 N) | 6.88 N | 6.88 N |
+| NEES, mean (26 expected) / time inside the band | 20.6 / 77% | 20.5 / 77% |
+| USBL NIS, mean (2 expected) | 2.2 | 2.2 |
+
+What it shows:
+
+- **Two to three centimetres, from a fix of five.** With a USBL fix every second and a DVL
+  in between, the vehicle knows its position within 2.5 cm RMS and 5.5 cm at worst; the
+  one-sigma value saws between the fixes and the error lives inside it. Chapter 9 found
+  1 to 2 cm with the same sensors in the plane; the third dimension and the heading cost the
+  rest.
+- **The heading is found without a compass**, within ten seconds, from the way the DVL's
+  velocity integrated with the wrong heading disagrees with the fixes: it settles within
+  $2^\circ$ after 9 to 12 s and stays within $1.2^\circ$ RMS. The filter's band says the same.
+- **The current and the object are found.** The current estimate follows the gusts within
+  4 cm/s and a few seconds of lag; the force at the jaws is zero until the grasp and 6.88 N
+  two seconds after it, against the object's 6.87 N weight in water. That is the signal the
+  LQR of chapter 5 did not have and chapter 8 will build on.
+- **Both filters are consistent, and the same.** The NEES averages 20.5 against 26 expected
+  and is inside the band three quarters of the time, a little conservative; the USBL's NIS
+  averages 2.2 against 2. On the nominal mission the two error definitions give the same
+  estimate to a millimetre, which is the first honest result of the chapter: with a model this
+  good and a fix every second, the heading is well enough known that where the error is
+  defined does not matter.
+
+## 3.3 Under stress
+
+<Figure src="/media/subsea-lab/nav_consistency.png" width={100} alt="Two rows of five panels, one column per scenario: nominal, gust, USBL outage, wrong heading, no DVL. Top row, the NEES averaged over one second on a logarithmic axis for both filters, with the 95 percent band of a chi-square with 26 degrees of freedom shaded: the nominal case stays in the band except for a spike to 60 at the grasp; the gust drives it to 60 at its onset and 300 at its end, back inside within five seconds; the outage leaves it inside the band throughout; the wrong heading starts the error-state filter at 40 and the invariant one at 300, both inside the band after ten seconds; without the DVL both stay inside but the invariant one sits lower. Bottom row, the NIS of each USBL fix with its band: inside it in every case, with the twenty-second gap of the outage">
+
+Consistency over the mission under each stress: the NEES (top) and the USBL's NIS (bottom)
+for both filters, with their 95% bands; the gust and the outage are shaded in red
+
+</Figure>
+
+| scenario | position RMS, error-state / invariant | heading RMS | current RMS | NEES mean | time in band |
+|---|---|---|---|---|---|
+| nominal | 2.5 / 2.4 cm | $1.2^\circ$ / $1.2^\circ$ | 4.2 cm/s | 20.6 / 20.5 | 77% / 77% |
+| gust | 2.5 / 2.5 cm | $1.2^\circ$ / $1.3^\circ$ | 5.9 cm/s | 27.4 / 27.2 | 74% / 73% |
+| USBL outage | 2.9 / 2.8 cm | $1.3^\circ$ / $1.3^\circ$ | 4.4 cm/s | 20.3 / 20.2 | 78% / 77% |
+| wrong heading | 3.5 / 3.6 cm | $2.6^\circ$ / $2.7^\circ$ | 4.2 cm/s | 20.0 / 21.3 | 74% / 74% |
+| no DVL | 7.4 / 7.3 cm | $5.3^\circ$ / $2.2^\circ$ | 6.3 / 6.1 cm/s | 21.4 / 19.2 | 75% / 64% |
+
+What it shows:
+
+- **The gust is seen, late.** A half-metre-per-second gust across the vehicle is 2.5 times
+  the current the filter has been tracking; the current estimate lags it by a few seconds
+  and the NEES spikes to 300 as it arrives and leaves, then returns to the band within five
+  seconds. The filter is honest about being surprised: a monitor on the NEES, or on the DVL's
+  innovations, would flag the gust. Chapter 10 will use that.
+- **Twenty seconds without the fix cost half a centimetre.** With the DVL and the model the
+  vehicle dead-reckons through the outage, which spans the reach and the grasp, at 2.9 cm RMS
+  against 2.5, and the NEES never leaves the band. The fix once a second was never the limit;
+  the DVL is.
+- **A wrong heading is corrected in ten seconds by either filter**, and the invariant one
+  starts worse. With the heading $30^\circ$ wrong and the filter believing $10^\circ$, both
+  filters find it within $2^\circ$ after 8 to 14 s; in the meantime the position error reaches
+  13 cm. The error-state filter's NEES starts at 40, the invariant one's at 300: its error
+  lives on the group, where a heading error three metres from the origin is a metre and a
+  half of position error, and mapping a covariance stated in the body's coordinates into that
+  error is a linearisation that a $30^\circ$ error breaks. Barrau and Bonnabel's consistency
+  result is for an IMU-driven vehicle; for a model-driven one with a fix every second, the
+  invariant error does not buy the initial transient it is known for.
+- **Without the DVL the filters finally differ.** Position goes to 7.4 cm for both, but the
+  heading, now observable only through the fixes and the model, is $5.3^\circ$ RMS for the
+  error-state filter and $2.2^\circ$ for the invariant one (it settles within $2^\circ$ at
+  48 s; the error-state one never does). The invariant error's coupling of position to heading
+  is what makes the fixes inform the heading, and it shows exactly where the heading is weakly
+  observed. Its NEES is also lower (19 against 21, inside the band 64% of the time), so it
+  pays for the better heading with a slightly pessimistic covariance.
+
+## 3.4 The tip floor
+
+<Figure src="/media/subsea-lab/nav_floor.png" width={100} alt="Three bar charts, one bar pair per scenario for the two filters, with the two flights' values as ticks. Left, the vehicle's position error: two and a half centimetres nominal, three with the outage and the wrong heading, seven without the DVL. Middle, the error of where the vehicle believes its tip is: about half a centimetre more than the position error in every case. Right, how far the controller acting on the estimate puts the tip from the handle while holding it: four centimetres nominal, with the outage and with the wrong heading, thirteen during the gust, eleven to twelve without the DVL, against the half centimetre of chapter 5 with the true state, drawn as a dotted line">
+
+How well the vehicle knows where it is (left), where it thinks its tip is (middle), and where
+the controller acting on that belief puts the tip (right), per scenario and filter
+
+</Figure>
+
+| sensors | estimator | vehicle position, RMS | tip estimate, RMS / worst | tip from the handle, worst |
+|---|---|---|---|---|
+| true state (chapter 5) | none | 0 | 0 | 0.5 cm |
+| all | either | 2.5 cm | 2.8 cm / 6 to 7 cm | 4.2 cm |
+| all, USBL out 20 s | either | 2.9 cm | 3.3 cm / 6 to 7 cm | 4.6 cm |
+| all, heading $30^\circ$ wrong | either | 3.5 cm | 4.7 cm / 20 cm | 3.8 cm |
+| all, in the gust | either | 2.5 cm | 2.9 cm / 6 to 7 cm | 13.5 cm (8 to 19) |
+| no DVL | error-state / invariant | 7.4 / 7.3 cm | 7.8 / 7.3 cm | 12.5 / 10.7 cm |
+
+What it shows:
+
+- **The estimate is the limit, by a factor of nine.** With the true state chapter 5 held the
+  tip within half a centimetre of the handle; on the estimate the same controller holds it
+  within 4.2 cm, which is the vehicle's position error plus the heading's lever arm over the
+  arm's reach. Nothing in the controller changed. The 5 cm fix once a second sets a floor of
+  about 3 cm on the tip, and that floor is what chapter 4 asks the camera to lower.
+- **The floor is the same for both filters** wherever the heading is observed; it is a third
+  lower for the invariant filter where it is not (no DVL). The chapter's answer to "which
+  estimator" is therefore: either, until a sensor fails.
+- **The gust is a control problem, not an estimation one.** During the gust the estimate is
+  as good as ever (2.9 cm) and the tip is 13 cm off: the vehicle is pushed faster than the
+  LQR's integral action follows. That is the disturbance chapter 6's barriers must leave room
+  for, and the current estimate above is what they will have to go on.
+- **The worst case is the start.** Every scenario's worst tip-estimate error, 6 to 20 cm, is
+  in the first ten seconds, while the heading settles; the approach from 3 m is where the
+  mission can afford it. A mission that started next to the structure could not.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 3.1 | two filters | the same model, sensors and controller; one filter class, two error maps, Jacobians by finite differences through the maps |
+| 3.2 | the nominal mission | 2.5 cm and $1.2^\circ$ from a 5 cm fix and no compass; the current and the object's weight found; both filters consistent and identical |
+| 3.3 | under stress | the gust surprises the filter and it says so; the outage costs half a centimetre; a wrong heading is fixed in ten seconds by either; without the DVL the invariant error halves the heading error |
+| 3.4 | the tip floor | 4 cm on the estimate against 0.5 cm on the truth: the estimate is the limit, nine times over |
+
+Three threads continue:
+
+- **The floor is 3 cm, and it is the fix.** The USBL's 5 cm once a second, filtered, leaves
+  the vehicle 2.5 cm uncertain and the tip 3 cm; the controller turns that into 4 cm at the
+  handle. Chapter 4 replaces the fix with a pose relative to the structure from the camera,
+  and chapter 6 sets the barrier margin from whichever bound is in force.
+- **The covariance can be believed**, in the nominal case and after a transient, by either
+  filter: the NEES sits in its band three quarters of the time and the USBL's innovations
+  are white. The NEES spikes when the water changes faster than the filter's random walk
+  allows, which is a monitor, not a failure. Chapter 10 keeps it.
+- **The invariant error earns its place only where observability is weak.** On this vehicle,
+  with this model and a fix every second, it changes nothing until the DVL is gone, and it
+  starts a wrong-heading transient worse than the plain filter. The cheap, general way the
+  two were built (finite differences through the error map) is what made that comparison
+  possible in a day, and it leaves the error map a free choice for chapter 6.
+
+What we learned:
+
+- A model-based filter on this vehicle knows its position within 2.5 cm and its heading
+  within $1.2^\circ$ from a 5 cm fix once a second, a DVL and no compass, and its stated
+  covariance is right to within 25%.
+- The estimate limits the tip to about 4 cm at the handle, nine times the controller's own
+  error; the fix sets that floor, the controller cannot lower it.
+- The invariant EKF is not better where the heading is observed, and starts a large heading
+  transient worse; it is twice as good on the heading without a DVL. The error definition
+  matters only where the sensors leave something unobserved.
+- The current and an unknown load are both found, to 4 cm/s and 0.01 N, and a gust shows in
+  the consistency statistic before it shows in the error: the model's innovations are a
+  validity signal.
+
+**Back to the [project page](/projects/subsea-lab/).**

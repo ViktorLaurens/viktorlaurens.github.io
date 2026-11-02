@@ -1,0 +1,266 @@
+---
+project: subsea-lab
+number: 2
+title: "Safe active identification"
+summary: "Safe active identification: experiments designed to stay inside a box in a current, output error against regression against the Cramér–Rao bound, and what a held-out mission says about the model."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 1 ended with a ranking: of the thirty-odd hydrodynamic coefficients, the horizontal
+plane's quadratic drag and added mass set where the tip goes, yaw drag most of all, and the
+roll and pitch coefficients hide behind the autopilot. pendulum-lab's chapter 9 ended with a
+warning: random thrust steps barely excited the pitch drag, and a "gentle" run lost the added
+mass altogether. This chapter puts the two together next to the structure, where a vehicle
+cannot fly wild steps, and asks: how much identification quality is lost when the vehicle may
+not leave a box, and can designing the experiment buy it back?
+
+The code is in `src/subsea_lab/identification.py`; the
+numbers come from
+`scripts/evaluate_identification.py`.
+
+## 2.1 What an identification run knows
+
+The run reads the sensors of the mission at $100\ \text{Hz}$: the body velocities from the
+DVL and the gyros, the attitude, the joint angles and rates, each with Gaussian noise
+(1 cm/s, $0.002\ \text{rad/s}$, $0.3^\circ$, $0.1^\circ$, $0.02\ \text{rad/s}$). It knows
+what it asked for: the wrench the compensating mixer of chapter 5 believes it delivers and the
+joint torques. It also knows the thrusters' third-order lag, which the paper identified, so
+the wrench the thrusters actually deliver follows from the command history; the lag's states
+are part of the record, not of the unknowns. One thing it is given that a real vehicle would
+have to estimate: the water's velocity, as a DVL's water track would give it. Chapter 3
+estimates the current; here it is known, and the identification errors below are the floor
+that knowing it leaves.
+
+The unknowns are the twenty coefficients of chapter 1's sensitivity study: six added masses,
+six linear and six quadratic drag coefficients of the vehicle, and the drag and added-mass
+coefficients of the arm's links. They span three decades, so each is scaled by the order of
+magnitude a designer knows from the vehicle's class (ten kilograms of added mass, a hundred
+newtons of quadratic drag at one metre per second, one for the arm), and every error below is
+quoted over that scale. Two estimators fit them, both inherited from chapter 9:
+
+- **Regression.** The inverse dynamics of section 1.2 are affine in the coefficients,
+
+  $$
+  M(\boldsymbol\theta) \thinspace \dot{\boldsymbol\zeta} + \mathbf c(\boldsymbol\theta) - \mathbf f(\boldsymbol\theta) = \mathbf r_0 + \Phi \thinspace \boldsymbol\theta,
+  $$
+
+  so with the accelerations differenced from the measured velocities (a Savitzky–Golay
+  filter over 0.11 s) the coefficients come from one linear least squares over the run. The
+  compiled model of section 1.6 gives $\Phi$ exactly, as the Jacobian of the residual.
+- **Output error.** The designer's model replays the recorded inputs from the measured state
+  in windows of 1.5 s, and Gauss–Newton finds the coefficients that make its velocities match
+  the measured ones,
+
+  $$
+  \hat{\boldsymbol\theta} = \arg\min_{\boldsymbol\theta} \sum_k \left( \mathbf y_k(\boldsymbol\theta) - \mathbf y_k \right)^\top \Sigma^{-1} \left( \mathbf y_k(\boldsymbol\theta) - \mathbf y_k \right),
+  $$
+
+  with $\mathbf y_k$ the ten velocities at every tenth sample and $\Sigma$ the sensor noise.
+  Short windows matter: the textbook model, with too little drag and no righting in pitch,
+  blows up inside a longer one before the fit can correct it. Each fit from the textbook model
+  takes between half a minute and two minutes on the compiled twin.
+
+Before any run is flown, its value is known. The sensitivities of the replayed outputs to the
+coefficients, $S_k = \frac{\partial \mathbf y_k}{\partial \boldsymbol\theta}$, give the Fisher
+information $J = \sum_k S_k^\top \Sigma^{-1} S_k$, and the **Cramér–Rao bound** says no
+unbiased estimator can do better than $\sqrt{(J^{-1})_{ii}}$ on coefficient $i$. That number,
+per coefficient and per run, is what the chapter compares, and $\log\det J$ is what the
+**experiment design** maximises: the thrust levels of ten 1.5-second intervals in surge, sway,
+heave and yaw, under a roll-and-pitch autopilot and with the arm swung to the side and back
+as in chapter 1, chosen by Powell's method with a penalty for every metre the run leaves its
+box. The box is the safety constraint of a vehicle next to a structure: in open water, two
+metres each way; next to the structure, half a metre to each side, 30 cm toward the wall and
+30 cm in depth, and $20^\circ$ of tilt either way. Next to the structure the programme can be
+flown in two ways: as open-loop thrust steps, or as perturbations added to the wrench of
+chapter 5's station-keeping LQR, which holds the box while the steps excite; both are
+designed, each in 250 evaluations of about twenty minutes.
+
+## 2.2 Three excitations and what each can know
+
+<Figure src="/media/subsea-lab/id_excitations.png" width={100} alt="Four columns, one per excitation. Top row, the path in the horizontal plane with the allowed box dashed in red: the random steps wander three metres north and leave the two-metre box; the open-water design stays inside its box; the open-loop design next to the structure drifts a metre out of the half-metre box, downstream and away from the wall drawn as a red line; the station-kept design stays within thirty centimetres. Middle row, the heading and the depth over fifteen seconds: the random steps turn through 170 degrees, the station-kept run through 20. Bottom row, the thrust programmes as steps in surge, sway, heave and yaw">
+
+Chapter 1's random steps, the programme designed for the most information inside a 2 m box,
+and two designed inside the half-metre box next to the structure, open loop and on top of
+station keeping: the path, the heading and depth, and the thrust asked
+
+</Figure>
+
+| excitation | box | farthest from the start | heading swept | $\log\det J$ |
+|---|---|---|---|---|
+| random steps, open water | none | 3.1 m north, 1.8 m east, 1.5 m deep | $171^\circ$ | 224 |
+| designed, open water | 2 m | 2.3 m, 1.4 m, 1.7 m | $104^\circ$ | 227 |
+| designed, next to the structure, open loop | 0.5 m | 1.2 m, 1.2 m, 1.0 m; **leaves the box by 45 cm** | $118^\circ$ | 213 |
+| designed, next to the structure, station kept | 0.5 m | 0.29 m, 0.32 m, 0.25 m | $21^\circ$ | 213 |
+
+What it shows:
+
+- **Open water rewards design, a little.** The random steps of chapter 1 roam over three
+  metres and would need no box at all; the programme designed inside two metres is more
+  informative (227 against 224 nats) while never leaving them. It does so by spending its
+  thrust early and letting the vehicle coast back through the current in the second half.
+- **Next to the structure, open loop is not an option.** No programme of thrust steps holds
+  a half-metre box for fifteen seconds in a 0.2 m/s current with gusts; the best the design
+  finds drifts a metre downstream and 45 cm out of the box. The experiment that is allowed is
+  the closed-loop one: the station-keeping controller holds the vehicle within 30 cm and the
+  designed perturbations ride on top.
+- **The box costs eleven to fourteen nats**, out of 227, and the two confined designs are
+  worth the same (213) whether or not one of them cheats on the box. Spread over twenty
+  coefficients that is a factor of about two in each bound, not an order of magnitude; the
+  next section says where it lands.
+
+## 2.3 What the fits actually get
+
+Each excitation is flown once and measured three times with different sensor noise; both
+estimators fit each record, the output-error fit starting from the textbook model of
+chapter 1.
+
+<Figure src="/media/subsea-lab/id_bounds.png" width={100} alt="Two panels with the twenty coefficients along the horizontal axis and a logarithmic vertical axis in units of each coefficient's scale. Left, the Cramer-Rao bound of each excitation: between one and three thousandths for the translational added masses, around one hundredth for the quadratic drags and the linear drags, up to a third for the quadratic pitch drag, and roughly twice as high for the confined runs as for the open-water ones. Right, the error the fits made, root mean square over three noise realisations: output error as filled markers, a few hundredths and five to twenty times the bound; regression as hollow markers, around a half for the added masses and above one for several drags">
+
+Per coefficient: the bound each run allows (left) and the error each estimator made (right,
+output error filled, regression hollow); the dashed line is 20% of the coefficient's scale
+
+</Figure>
+
+| coefficient (over its scale) | bound, open water | bound, station kept | output error, open water | output error, station kept | regression, open water |
+|---|---|---|---|---|---|
+| $X_{\dot u}$ surge added mass | 0.001 | 0.003 | 0.004 | 0.029 | 0.56 |
+| $Y_{\dot v}$ sway added mass | 0.001 | 0.003 | 0.004 | 0.029 | 0.54 |
+| $X_{u\lvert u \rvert}$ surge drag | 0.005 | 0.009 | 0.023 | 0.049 | 0.17 |
+| $Y_{v\lvert v \rvert}$ sway drag | 0.008 | 0.017 | 0.053 | 0.038 | 0.13 |
+| $N_{r\lvert r \rvert}$ yaw drag | 0.006 | 0.012 | 0.007 | 0.040 | 0.13 |
+| $M_{q\lvert q \rvert}$ pitch drag | 0.080 | 0.025 | 0.47 | 0.15 | 0.65 |
+| $C_{d,\mathrm{arm}}$ arm drag | 0.002 | 0.003 | 0.006 | 0.010 | 0.005 |
+| $C_{a,\mathrm{arm}}$ arm added mass | 0.004 | 0.006 | 0.037 | 0.026 | 0.43 |
+
+What it shows:
+
+- **The box roughly doubles the bound on what matters.** Surge and sway added mass go from
+  a thousandth of their scale to three; the quadratic drags of the horizontal plane from
+  half a percent to one or two. Every coefficient chapter 1 ranked as important is still
+  bounded within 2% of its scale from inside a half-metre box.
+- **Output error gets within a few percent; regression does not.** Fitted by output error,
+  the open-water design pins the added masses to 0.4% and the drags to 1 to 5%; the
+  station-kept run to 3% and 4 to 5%. Regression, on the same records, is off by half on
+  every added mass and by 13 to 17% on the drags, with or without noise: the accelerations it
+  differences miss the first tenth of a second of every thrust step, and that is exactly
+  where the added mass shows. Chapter 9 saw the same with a much cheaper model.
+- **Nobody reaches the bound.** The output-error errors sit five to twenty bounds above the
+  Cramér–Rao floor. The bound assumes an unbiased estimator that knows where each window
+  starts; the fits start their windows from smoothed, noisy measurements and stop after
+  thirty evaluations. The gap is a cost of the method, not of the experiment, and it is the
+  same for every excitation.
+- **Pitch is the one place the structure helps.** The station-kept run bounds the quadratic
+  pitch drag at 0.025 where the open-water runs allow 0.08 to 0.3, and fits it to 15% where
+  the others get 30 to 50%: the LQR holds pitch more loosely than the autopilot's stiff PD,
+  so the pitch actually moves. Chapter 1's warning stands in general (an axis that is held
+  cannot be identified) and this is the exception that proves it.
+
+## 2.4 Predicting the mission
+
+The test that matters is not the run the coefficients were fitted on but the mission they will
+serve. Chapter 5's mission is flown on the true plant in a different current, and each
+identified model replays it in 3 s windows from the true state: the arm reaching, the grasp,
+the lift, the return with the object (which no model knows and all carry as the same payload
+term). The arm's joints are taken from the record, because they are servoed and measured and
+because replaying their recorded torques open loop makes an arm holding an object a pendulum
+balanced on a constant torque, which runs away within a window for any model but the true one;
+the models are judged on where they put the vehicle, and the tip with it.
+
+<Figure src="/media/subsea-lab/id_heldout.png" width={100} alt="Left and middle, horizontal bars on logarithmic axes: the root-mean-square velocity error and tip error over the mission for the textbook model, for regression and output error on each of the four excitations, and for the true coefficients. The textbook model is at 23 centimetres per second and 36 centimetres; regression at one to one and a half centimetres per second and two centimetres; output error at a tenth to four tenths of a centimetre per second and one to six millimetres; the truth at zero. Right, the velocity error after up to three seconds of prediction over the mission's sixty-two seconds, one output-error fit per excitation against the textbook model and the truth, with the approach, reach, lift and return shaded: the fitted models stay between a hundredth and half a centimetre per second, rising a little while the object is carried; the textbook model is at ten">
+
+The mission predicted by each model: velocity and tip errors over the mission (left), and the
+velocity error along it (right)
+
+</Figure>
+
+| model | velocity error, RMS | tip error, RMS | tip error, worst |
+|---|---|---|---|
+| textbook | 23 cm/s | 36 cm | 109 cm |
+| regression, open water (random or designed) | 1.4 to 1.5 cm/s | 2.1 to 2.5 cm | 6 to 7 cm |
+| regression, station kept | 0.3 to 0.4 cm/s | 0.5 to 0.6 cm | 1.4 to 1.7 cm |
+| output error, random steps | 0.08 to 0.09 cm/s | 0.13 cm | 0.4 cm |
+| output error, designed, open water | 0.15 to 0.39 cm/s | 0.2 to 0.5 cm | 0.5 to 1.6 cm |
+| output error, station kept | 0.16 to 0.40 cm/s | 0.2 to 0.6 cm | 0.6 to 1.6 cm |
+| true coefficients | 0 | 0 | 0 |
+
+What it shows:
+
+- **Any fit beats the textbook by two orders of magnitude.** The nominal model of chapter 1
+  predicts the vehicle's velocity 23 cm/s wrong after three seconds and the tip 36 cm; every
+  identified model is within half a centimetre per second and six millimetres.
+- **The confined experiment costs a factor of two to four on the mission**, not more. Fitted
+  from the station-kept run, the model predicts the mission's velocities within 0.2 to
+  0.4 cm/s and the tip within 2 to 6 mm, against 0.1 cm/s and 1.3 mm from the random steps
+  flown in open water. For comparison, the acoustic fix the mission's estimator will live on
+  is 5 cm.
+- **Regression is good enough for the mission, by this measure.** Half-wrong added masses
+  cost 1.5 cm/s and 2 cm of tip over three seconds at the mission's speeds, where drag and
+  gravity dominate and the accelerations are small. On the station-kept run its errors are
+  smaller still, because the gentler run differences better. Chapter 9's conclusion returns:
+  identification matters most for the fast transients, and the mission has few.
+- **The object is where the error grows.** For every fit the velocity error rises while the
+  object is carried back (38 to 58 s), by a factor of two to three: the drag and the added
+  mass of the payload are modelled, but the arm's own drag at the carrying pose, with the
+  flow at 0.35 m/s, exposes the arm coefficients' errors more than the rest of the mission.
+  That is chapter 8's problem.
+
+## 2.5 What no allowed experiment can know
+
+Some coefficients stay uncertain whatever the run, and the chapter is obliged to say which:
+
+- **The pitch and roll drags.** With roll and pitch held, their quadratic drags are bounded
+  at 2 to 30% and fitted to 7 to 50% of their scale. The mission holds them too, so it does
+  not care; a controller that lets the vehicle pitch, such as a reach that uses the body, will
+  have to tolerate a factor-of-two error in how fast the pitch stops.
+- **The linear drags.** Where the paper gives zero (sway, roll, yaw) the fits return 0 to
+  25% of scale; where it gives a value (surge, heave) the heave term is 10 to 45% off: at
+  the speeds of these runs the quadratic term dominates and the two trade off. Chapter 1's
+  sensitivity study said the linear terms were worth a tenth of the quadratic ones, and the
+  mission prediction confirms that the error is cheap.
+- **The pitch coefficients from an open-loop run**, and the yaw coefficients from a run that
+  does not turn: the station-kept run turns through $21^\circ$ and still bounds the yaw drag
+  at 1.2% because the LQR's corrections excite yaw continuously; a run that held its heading
+  as stiffly as the PD held pitch would not.
+
+What later chapters must therefore tolerate: coefficients of the horizontal plane within a
+few percent, the arm's within a few percent, the vertical plane's within ten, roll and pitch
+drag within a factor of two, and nothing at all about the object until chapter 8.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 2.1 | the run | twenty scaled coefficients, two estimators, a bound per run before it is flown, and a design that maximises it inside a box |
+| 2.2 | four excitations | design beats random steps in open water; open-loop steps cannot hold a half-metre box in the current; perturbing a station-keeping controller can, and the box costs a factor of two in the bounds |
+| 2.3 | the fits | output error within a few percent, five to twenty bounds above the floor; regression biased by half on the added masses; pitch identified only where it is allowed to move |
+| 2.4 | the mission | every fit predicts the mission a hundred times better than the textbook; the confined run costs a factor of two to four; the carried object is where the error grows |
+| 2.5 | what cannot be known | roll and pitch drag within a factor of two, linear drag poorly, the object not at all |
+
+Three threads continue:
+
+- **Safety is the experiment.** The only identification run allowed next to the structure
+  is a closed-loop one: the controller holds the box, the excitation rides on it, and the
+  controller's own corrections turn out to excite what the autopilot used to hide. Chapter 6
+  will set the box from a barrier rather than by hand.
+- **The bound is known before the run.** Each programme's Fisher information was computed on
+  the designer's model before it was flown, and the fits landed a fixed factor above it. The
+  online version (excite only when the posterior's uncertainty hurts the task) is left open,
+  as the plan said it might be; it needs chapter 5's NMPC in the loop.
+- **The current was given.** Every number here assumes the water's velocity known. Chapter 3
+  estimates it, and the identification errors that estimate adds are the next floor.
+
+What we learned:
+
+- A vehicle next to a structure cannot fly an open-loop identification programme in a
+  current; the experiment that is allowed perturbs a station-keeping controller, and it
+  costs about a factor of two in every coefficient's bound and two to four in how well the
+  mission is predicted.
+- Experiment design buys back less than the box takes: a few nats in open water, nothing
+  against the current without feedback.
+- Output error reaches a few percent on the coefficients the mission cares about; regression
+  is biased by half on the added masses by the thrust steps it cannot resolve, and still
+  predicts the mission within 2 cm.
+- The axes an autopilot holds cannot be identified, except where a looser controller lets
+  them move, which the station-kept run did for pitch.
+
+**Back to the [project page](/projects/subsea-lab/).**

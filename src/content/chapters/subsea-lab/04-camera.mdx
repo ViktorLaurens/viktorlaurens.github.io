@@ -1,0 +1,232 @@
+---
+project: subsea-lab
+number: 4
+title: "What the camera sees: underwater image formation and a calibrated pose"
+summary: "What the camera buys: a pose relative to the structure from a rendered underwater image, a conformal error bound by apparent size and turbidity, and a gate that makes the bound usable in the filter."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 3 ended on a floor: with a USBL fix of 5 cm once a second the vehicle knows where it
+is within 2.5 cm, and the controller acting on that estimate holds the tip within 4 cm of the
+handle, nine times worse than on the true state. The fix sets the floor. But the structure the
+arm works on is in view, and a camera that sees it gives a pose *relative to the structure*,
+which is the one thing the mission needs: not touching the structure while reaching it. This
+chapter asks at what turbidity the camera stops beating the acoustic fix, and whether its error
+bound knows it.
+
+The code is in `src/subsea_lab/camera.py` and the camera
+measurement in `src/subsea_lab/navigation.py`; the numbers
+come from `scripts/evaluate_camera.py`.
+
+## 4.1 A camera, the water, and a pose with a bound
+
+**The camera.** A forward camera on the bow, 25 cm ahead of the centre of gravity, tilted
+$20^\circ$ down toward the handle, 640 by 480 pixels, $70^\circ$ of vertical field of view, a
+headlight beside it. The structure's face carries four 8 cm ArUco markers around the handle,
+placed so that all four fit the frame from the working station, 35 cm from the face. MuJoCo
+renders what the camera sees from the vehicle's true pose, as a colour image and a range image;
+the vehicle itself is not simulated in MuJoCo yet, only seen from. From the station the markers
+are 72 pixels across; at 1.75 m they are 15, which is where detection ends.
+
+**The water.** The rendered image is what a camera would record in air. Water takes from it and
+adds to it, per colour channel $c$ and range $z$, in the revised image-formation model of
+Akkaynak and Treibitz:
+
+$$
+I_c = J_c \thinspace e^{-\beta_c^{D} z} + B_c^{\infty} \left( 1 - e^{-\beta_c^{B} z} \right),
+$$
+
+the direct signal $J_c$ attenuated along the path and the backscatter building up toward the
+water's own colour $B^\infty$ (a greenish blue). Both attenuation coefficients scale with one
+**turbidity** parameter: at $c = 1$ red loses an attenuation length in about a metre, at $c = 3$
+the water is a harbour. Shot noise and read noise are added and the result is clipped to eight
+bits. The headlight's falloff is MuJoCo's.
+
+**The pose.** OpenCV's ArUco detector finds the markers on the grey image and refines their
+corners; a perspective-n-point solution against the markers' known positions on the structure
+gives the camera's pose in the structure's frame, and the fixed mount gives the vehicle's. The
+markers all lie in one plane, and a planar target seen small has two poses that reproject
+almost equally well, the classic flip; the solver returns both, and a frame whose second
+solution fits within a factor of 1.5 of the first gives no fix rather than a wrong one. Each
+fix also reports what the vehicle can observe about its own quality and a wrong solution cannot
+fake: the markers' **apparent size** in pixels, which says how far they are, and their
+**contrast**, which is how turbid the water looks from where it stands.
+
+**The bound.** A controller that keeps a margin from the structure needs to know how wrong the
+pose can be, and the water decides that. Conformal prediction gives the number without a model
+of the error: on a calibration set of 3000 rendered frames at random poses in front of the
+face and random turbidity, the position errors are binned by apparent size and contrast, and
+in each bin the split-conformal quantile, the $\lceil (n+1)(1-\delta) \rceil$-th smallest error
+with $\delta = 0.1$, is the bound $q_{0.9}$. A frame that gave no fix counts as an infinite
+error in its bin, so a bin in which more than a tenth of the frames fail gets an infinite
+bound: the camera is not trusted there, nor outside the calibrated strata. The guarantee is the
+textbook one: for a fresh frame exchangeable with the calibration set, the error is below
+$q_{0.9}$ with probability at least 0.9. Its honest limits: the calibration frames are
+independent draws while a mission's frames are a correlated sequence, and the poses are drawn
+from where the mission goes, not from everywhere. Section 4.2 checks the coverage on fresh
+frames; section 4.3 checks it in flight.
+
+**In the filter.** Chapter 3's filter takes the camera fix as a measurement of the vehicle's
+position in the structure's frame at $10\ \text{Hz}$ whenever the markers are seen and the
+bound is finite, with the bound as its noise: a 3-D Gaussian's 90% radius is $2.5\sigma$, so
+$\sigma = \tfrac{q_{0.9}}{2.5}$ per axis. And it keeps its own guard: a fix whose innovation
+fails the filter's $\chi^2$ test at 99% is rejected. Section 4.3 shows what happens without it.
+
+## 4.2 From clear to murky
+
+<Figure src="/media/subsea-lab/cam_frames.png" width={100} alt="Twelve rendered frames in three rows and four columns. From the station, 35 centimetres from the face, the four markers and the handle fill the frame in every column and three or four markers are found with a fix within 0.4 centimetres, while the colour goes from the grey of the lit steel to the blue-green of the water as turbidity rises. At 0.95 metres all four markers are found in every column, with errors from 0.4 to 2.2 centimetres, and the scene dims and blues. At 1.75 metres the markers are fifteen pixels across: in clear water they are found with 5.8 centimetres of error, at turbidity 1 with 3.4, and at turbidity 2 and 3 the frame is a blue-green haze with no fix">
+
+What the camera records at 0.35, 0.95 and 1.75 m from the face (rows), in water of turbidity 0,
+1, 2 and 3 (columns), with the number of markers found and the fix's position error
+
+</Figure>
+
+<Figure src="/media/subsea-lab/cam_bound.png" width={100} alt="Three panels. Left, the position error of three thousand calibration frames against their range on a logarithmic axis, coloured by turbidity: below a centimetre up to 0.8 metres, a few centimetres at 1.2, tens of centimetres beyond 1.4 where the turbid frames turn into a row of crosses for no fix. Middle, the bound per stratum as a grid of apparent marker size against contrast: 0.7 centimetres for the largest markers, 1.1 to 1.9 for sizes between 28 and 45 pixels, 2.8 to 4.6 for 18 to 28 pixels, 6 to 16 for the smallest, and no bound at all in the lowest-contrast row. Right, against turbidity: the coverage where the bound is finite stays between 0.87 and 0.97 around the target of 0.9, while the share of fresh frames with a finite bound falls from one at clear water to 0.45 at turbidity 2.75">
+
+Left: the position error of every calibration frame against its range, coloured by turbidity,
+with the frames that gave no fix marked. Middle: the bound per stratum of apparent size and
+contrast. Right: on fresh frames, the coverage where the bound is finite and the share of
+frames the bound trusts, against turbidity
+
+</Figure>
+
+| | |
+|---|---|
+| calibration frames with a fix | 81% of 3000 |
+| bound from the station (72 px, any contrast above 0.3) | 0.7 cm |
+| bound at about 1 m (28 to 45 px) | 1.1 to 1.9 cm |
+| bound at about 1.4 m (18 to 28 px) | 2.8 to 4.6 cm |
+| bound beyond (10 to 18 px) | 6 to 16 cm |
+| bound at contrast below 0.3 | none |
+| coverage on 1500 fresh frames, where the bound is finite (target 0.90) | 0.902 |
+| share of fresh frames with a finite bound | 77% |
+
+What it shows:
+
+- **Near the face the camera is a millimetre instrument, whatever the water.** From the
+  station the markers are large and bright, the headlight is close, and the fix is within
+  4 mm at every turbidity the chapter uses; the bound there is 7 mm. The water's attenuation
+  is an exponential in range, and 35 cm is not much range.
+- **Turbidity takes range, not accuracy.** The error of a fix is set by the markers' size in
+  pixels, hence by range: a centimetre at 1 m, several at 1.4 m. What the water does is end
+  detection earlier: at $c = 3$ the markers are lost beyond about a metre, at $c = 0$ beyond
+  about 1.7 m. The lowest-contrast stratum, where the fixes that remain are the unreliable
+  ones, is never trusted.
+- **The bound is honest where it exists.** On fresh frames the coverage is 0.902 against the
+  target 0.90, between 0.87 and 0.97 in every turbidity band. The price is the share of frames
+  it refuses: every frame in clear water, under half of them at $c = 2.75$.
+- **A tenth is not covered, and that tenth is where the flips live.** Before the ambiguity test
+  was added, a far frame in clear water could return the mirror pose, thirty centimetres away
+  with a plausible range, and the first stratification (by the range the fix itself reported)
+  gave it the station's bound. Stratifying by apparent size, which the flip cannot change, and
+  rejecting ambiguous solutions removed the worst of it; what remains above the bound is a
+  few centimetres, not tens.
+
+## 4.3 The camera against the fix
+
+<Figure src="/media/subsea-lab/cam_floor.png" width={100} alt="Three panels against turbidity from 0 to 3, for the camera alone and for the camera with the USBL. Left, the tip estimate's error: 1.5 to 1.8 centimetres with both sensors at every turbidity, 1.6 to 2.7 with the camera alone, against the USBL's 2.4. Middle, the tip's distance from the handle while holding: 0.8 to 1.0 centimetres with both, 1.0 to 1.4 with the camera alone, against 4.4 for the USBL alone and 0.5 for the true state. Right, the share of camera frames used falls from 0.60 to 0.49 as the turbidity rises">
+
+The mission with the camera in the filter, against the USBL alone, at each turbidity: the
+estimated tip's error, the tip's distance from the handle while holding, and the share of
+camera frames used
+
+</Figure>
+
+| sensors | turbidity | vehicle position, RMS / worst | tip estimate, RMS | tip from the handle, worst | NEES |
+|---|---|---|---|---|---|
+| true state (chapter 5) | | 0 | 0 | 0.5 cm | |
+| USBL alone (chapter 3) | any | 2.0 / 4.5 cm | 2.4 cm | 4.4 cm | 21 |
+| camera alone | 0 to 1 | 1.4 / 7 cm | 1.6 to 1.7 cm | 1.0 cm | 20 to 21 |
+| camera alone | 1.5 to 3 | 1.9 to 2.5 / 8.6 cm | 2.1 to 2.7 cm | 1.0 to 1.4 cm | 20 to 23 |
+| camera and USBL | 0 to 3 | 1.2 to 1.5 / 4 to 5 cm | 1.5 to 1.8 cm | 0.8 to 1.0 cm | 19 to 20 |
+| camera alone, no gate | 0.5 | 10 / 42 cm | 11 cm | 1.1 cm | 27 |
+| camera and USBL, no gate | 0 | 15 / 70 cm | 20 cm | 1.0 cm | 63 |
+
+What it shows:
+
+- **The camera lowers the floor from 4.4 cm to 1 cm, and turbidity does not raise it.** At
+  every turbidity from clear water to a harbour, the controller acting on the camera's fix
+  holds the tip within a centimetre of the handle; with the USBL as well, within 0.8 to 1.0.
+  Against the true state's 0.5 cm, the estimate is now the limit by a factor of two, not nine.
+  The question the chapter set out with has a plain answer: within the range of water tried,
+  the camera does not stop beating the fix, because the mission's work is done 35 cm from the
+  face, where the markers are large.
+- **What turbidity costs is the approach.** The camera alone sees the markers for 60% of the
+  mission in clear water and 49% at $c = 3$; the rest is the approach and the return, flown on
+  the DVL and the model. The worst position error, 7 to 9 cm, is in those stretches, and the
+  share of the camera's fixes that the filter uses is the number that falls with turbidity.
+- **The filter stays consistent with the bound as its noise.** NEES 20 for 26 states, in the
+  band seven tenths of the time, in every case with the gate; and the share of fixes used that
+  exceeded their bound in flight is 1 to 6%, at or below the $\delta$ of 10% the bound promised.
+  The mission's frames are not independent draws, and the coverage held anyway.
+- **Without the gate, the uncovered tenth is enough to lose the vehicle.** The bound certifies
+  a quantile, not a distribution: the fixes it does not cover can be as wrong as they like. In
+  clear water those are the far, small, flipped-or-nearly ones, and a 20 cm fix handed to a
+  Gaussian filter as a 2.5 cm sigma yanks the estimate; the controller follows the estimate,
+  the camera's view follows the controller, and in the first run of this experiment the
+  vehicle never found the markers again. Kept here as the failure case: 10 to 15 cm RMS and up
+  to 70 cm of position error during the approach, the NEES at 27 to 63. The innovation gate,
+  the filter's own consistency test applied before it trusts, rejects 1% of the fixes and
+  removes the problem. A bound and a gate are both needed; neither alone is.
+
+## 4.4 Water that thickens
+
+<Figure src="/media/subsea-lab/cam_ramp.png" width={100} alt="Two panels over the mission's sixty-two seconds with the turbidity rising from 0.5 to 3 drawn as a grey line. Top, each camera fix: no fix for the first ten seconds of the approach, then the bound stepping down from 16 to 4 to 1.6 to 0.7 centimetres as the markers grow while the true errors fall from several centimetres to 0.4, with five fixes gated in the first two seconds of sight; from 42 seconds the bound steps back up to 1.6, 2.5 and 6 centimetres as the vehicle returns, and after 46 seconds no fix at all. Bottom, the vehicle's position error against the filter's own one-sigma value: 1 to 7 centimetres during the approach under the DVL alone, 0.3 to 1 centimetre while the camera sees the face, and a slow rise to 3 centimetres on the return, with the sigma following">
+
+One mission without the USBL in water whose turbidity rises from 0.5 to 3: the camera's bound
+and its true error at every fix (top), the filter's position error and its own uncertainty
+(bottom)
+
+</Figure>
+
+What it shows:
+
+- **The bound breathes.** As the vehicle closes on the face the bound steps down from 16 cm to
+  7 mm, stratum by stratum, and the true errors fall under it; as it returns with the object
+  into water that has meanwhile thickened to $c = 2.3$, the bound steps back up and the fixes
+  end a metre from the face, earlier than they began in clearer water. The margin a barrier
+  would take from this bound (chapter 6) would widen on the way out, which is what it should.
+- **The filter's uncertainty follows the sensors it has.** Under the DVL alone the position
+  sigma grows to 20 cm in ten seconds and the error to 7; the first trusted fix collapses both;
+  on the return both grow again, together. The vehicle knows when it does not know.
+- **Two seconds of doubt.** The first fixes, at 1.6 m with 12-pixel markers, are gated: their
+  innovations against a 20 cm prior are not the problem, their 7 cm errors against a 6 cm
+  bound are. The gate is doing what the bound asked.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 4.1 | the pipeline | a rendered camera through a water model to a PnP pose, a conformal bound indexed by apparent size and contrast, and a gate in the filter |
+| 4.2 | clear to murky | sub-centimetre at the face at any turbidity; turbidity takes range, not accuracy; the bound covers 0.90 on fresh frames and refuses what it cannot bound |
+| 4.3 | camera against fix | the tip floor from 4.4 cm to 1 cm at every turbidity; without the gate the uncovered tenth loses the vehicle |
+| 4.4 | thickening water | the bound breathes with the water and the range, and the filter's own uncertainty with it |
+
+Three threads continue:
+
+- **The floor is now 1 cm, and it is the camera's.** The fix once a second set 4 cm; the
+  structure in view sets 1; the true state would allow 0.5. Chapter 6 defines its barriers in
+  the structure's frame on this pose and sets their margin from this bound.
+- **A bound is not a noise model.** Conformal prediction promised a quantile and kept it, on
+  fresh frames and in flight. What it never promised is the size of the rest, and a Kalman
+  filter needs that. The gate is the honest bridge, and chapter 10's coverage monitor is the
+  check that the bound's $\delta$ is still being met when the water changes beyond the
+  calibration set.
+- **The plant is still only seen from.** MuJoCo renders the scene here; it does not yet carry
+  the vehicle, the arm or the object. Chapter 5 proper brings the contact, and then the camera
+  will see the arm in its own frame.
+
+What we learned:
+
+- A forward camera on fiducials gives the vehicle's pose relative to the structure within
+  4 mm from the working station in any water tried, and within a centimetre out to a metre;
+  turbidity ends detection earlier rather than making the fixes worse.
+- A conformal bound stratified by what the vehicle observes, the markers' apparent size and
+  contrast, covered its stated 90% on fresh frames and in flight, and refused the frames it
+  could not bound: none in clear water, half of them in a harbour.
+- With the camera in the filter the tip is held within a centimetre of the handle instead of
+  four, at every turbidity, because the mission's work is done close to the face.
+- The tenth the bound does not cover is enough to lose the vehicle if the filter trusts it
+  blindly; the filter's own innovation gate is the necessary companion of a conformal bound.
+
+**Back to the [project page](/projects/subsea-lab/).**

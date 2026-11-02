@@ -1,0 +1,244 @@
+---
+project: subsea-lab
+number: 7
+title: "Learning inside the physics"
+summary: "The residual after identification is the object: three numbers, a free network, a passive-by-construction model with a certificate and a Gaussian process, off the data and inside an optimizer."
+---
+import Figure from '../../../components/Figure.astro';
+
+pendulum-lab's chapter 9 ended on a warning. Its NMPC was the most capable controller on the
+planar vehicle and the only one that failed after the grasp, and when a residual network was
+put inside it to learn what the lumped model missed, the controller drove the vehicle 85 to
+115 cm off: nothing constrained the network where the optimizer looked, which was off the
+training trajectory. This chapter asks the third of the report's three questions, what may be
+learned inside the physics. The answer it builds is a learned model that cannot create energy,
+because its structure forbids it, and the question it puts to that model is whether the
+structure costs accuracy, whether it buys anything an identified model does not already have,
+and whether it survives inside an optimizer where the free network did not.
+
+The code is in `src/subsea_lab/learned.py` and
+`src/subsea_lab/nmpc.py`; the numbers come from
+`scripts/evaluate_learning.py`.
+
+## 7.1 What is left to learn
+
+Chapter 2 identified the vehicle to within a few percent on every coefficient the tip is
+sensitive to. What it could not identify is what is not in the model: the object. After the
+grasp the designer's model (chapter 2's station-kept output-error fit) is wrong by the
+object's weight in water, its mass and added mass at the jaws, and its drag, and it is wrong
+in a way that depends on the arm's configuration, because a weight at the jaws is a pitch
+moment on the vehicle whose arm is the lever. The **residual** is defined on the generalized
+coordinates of chapter 1, the vehicle's twist and the four joint rates:
+
+$$
+\mathbf{r} = \mathbf{M}(\mathbf{q})\dot{\boldsymbol\zeta} + \mathbf{c}(\mathbf{q}, \boldsymbol\zeta) - \mathbf{f}(\mathbf{q}, \boldsymbol\zeta, \mathbf{u}),
+$$
+
+the force the designer's model would have needed to reproduce the plant's acceleration, with
+the thrust from the delivered wrench (the thruster lag of chapter 2 reconstructed from the
+command history). It is computed on the true plant carrying the mission's object, 1 kg and
+0.3 L (6.87 N in water), from the grasp at 32 s to the end at 62 s, one sample every tenth of
+a second: 301 samples. Before the grasp the residual is the lumping error of chapter 2, a
+hundred times smaller, and the models below are not asked about it; the learned part is the
+object's model, switched on by the grasp the mission knows.
+
+The residual is not small. Its heave component is 6.85 N rms, its pitch moment 2.5 N m, its
+shoulder torque 1.26 N m; the forward force, 0.3 N, and the roll moment, 0.34 N, are what the
+object's drag and the arm's lever do when the vehicle moves. The identified model carries none
+of it, which is the controller's problem in section 7.4.
+
+## 7.2 Four models of it
+
+Four things are fitted to the same 301 samples, each with the features the plant exposes
+(the joint angles, the ten generalized velocities, and the direction of gravity in the body
+frame, seventeen numbers), and each exported to CasADi so that it can sit inside an optimizer.
+
+**Three numbers.** The physics of an object at the jaws is a weight $w$ along gravity, a mass
+$m$ that resists the tip's acceleration, and a quadratic drag $d$ against the tip's velocity,
+each mapped to the generalized coordinates by the tip's Jacobian $\mathbf{J}$:
+
+$$
+\mathbf r_{\text{phys}} = w\ \mathbf{J}^\top \mathbf e_\downarrow - m\ \mathbf{J}^\top \mathbf a_{\text{tip}} - d\ \mathbf{J}^\top \lVert \mathbf v_{\text{tip}} \rVert \mathbf v_{\text{tip}}.
+$$
+
+This is linear in the three numbers and is fitted by least squares in a tenth of a second.
+It is chapter 2's way of thinking carried to the object, and it is the baseline every learned
+model must beat. On the training flight it leaves 3.6% of the residual unexplained; it finds
+the weight at 6.86 N (true 6.87) and the mass at 1.15 kg (the object plus the water it drags).
+
+**A free network.** A two-layer network of 64 units on the standardised features, ten
+outputs, the residual of chapter 9 reproduced: 3000 epochs of Adam, 3 s. Nothing constrains it
+anywhere.
+
+**A passive model.** The three numbers, held at their least-squares values, plus the two
+things the physics says an unknown body in water can add and nothing else: an **added mass**
+on the vehicle, constant, symmetric and positive semidefinite by construction
+($\mathbf M_a = \mathbf L_m \mathbf L_m^\top$, with Fossen's skew-symmetric Coriolis
+derived from it, so that it stores kinetic energy and returns it), a diagonal added inertia
+on the joints, and a **dissipation** that is positive semidefinite at every state because it
+is built as a square, $\mathbf{D}(\mathbf{x}) = \mathbf{L}(\mathbf{x})\mathbf{L}(\mathbf{x})^\top$,
+with $\mathbf{L}$ the lower-triangular output of a small network of 32 units (55 numbers).
+The force is
+
+$$
+\mathbf r_{\text{passive}} = \mathbf r_{\text{phys}} - \mathbf M_a \dot{\boldsymbol\zeta} - \mathbf C_a(\boldsymbol\zeta)\boldsymbol\zeta - \mathbf{D}(\mathbf{x})\boldsymbol\zeta ,
+$$
+
+and the network, the factor $\mathbf L_m$ and the joint inertias are trained by Adam on what
+the three numbers leave, 7 s. The model is **passive by construction**: with the storage
+function $H = \tfrac12 \boldsymbol\zeta^\top(\mathbf{M} + \mathbf M_a)\boldsymbol\zeta + w z_{\text{tip}}$,
+the weight is the gradient of a potential, the added mass and its Coriolis term do no net
+work, and the drag and the dissipation can only take energy out, so along any motion
+$\dot H \le \boldsymbol\zeta^\top \boldsymbol\tau$: the learned part cannot put energy in.
+This is the property chapter 9's network lacked, and the one section 7.3 tests.
+
+**A sparse Gaussian process.** A squared-exponential kernel on the standardised features,
+200 inducing points, one output per coordinate, with the variance it reports away from its
+data. Its prior mean is zero, so far from the data it predicts nothing at all, and says so.
+
+## 7.3 On the trajectory, off it, and the energy balance
+
+<Figure src="/media/subsea-lab/learn_residual.png" width={100} alt="Four panels of forces over mission time from 32 to 62 seconds. Left column, the mission's object in a current the models were not trained in: the measured heave residual rises to 8.5 newtons at the grasp and settles at 6.8, the measured pitch moment sits at minus 3.3 newton metres during the lift and minus 2.2 after; the three-numbers line and the passive model lie on the measured one, the free network lies on it with small ripples, and the GP follows it with excursions of several newtons during the lift and the return. Right column, a 2 kilogram object after two seconds of adaptation: the measured heave residual is 14 newtons and the pitch moment minus 7 then minus 4.5; the three numbers and the passive model follow them, the free network wanders between 5 and 14 newtons, and the GP sits at 0 then at 7 newtons, half the truth">
+
+The residual's heave force (top) and pitch moment (bottom), measured and as each model
+predicts it: the mission's object in a current the models never saw (left) and a 2 kg object
+after two seconds of adaptation (right); the three numbers are dashed
+
+</Figure>
+
+**What it shows.** On the training flight the free network fits best (0.8% of the residual
+left), the passive model next (1.2%), the three numbers 3.6%, the GP 16%. In another current,
+with the same object, all three physics-bearing models are at 3 to 4% and the three numbers
+alone, at 2.8%, are the best of them: whatever the networks learned beyond the three numbers
+was the flight, not the object. The GP is at 23%.
+
+Then the object changes. A 2 kg object never seen (13.7 N in water) leaves every model
+predicting the 1 kg one, 51% wrong for all of them, and a 0.3 kg object leaves them predicting
+a residual two and a half times the real one. No feature says what is in the jaws, so nothing
+trained on one object can know; this is chapter 8's question, and here only the mechanism
+matters: what each model can do with the first two seconds after a new grasp. The three
+numbers re-fit by least squares on twenty samples and land at 5% on both objects. The passive
+model re-fits the same three numbers and keeps its network: 7% on the heavier object, 18% on
+the lighter one, worse than the numbers alone, because what its network learned on the 1 kg
+flight was partly that object. The free network fine-tuned on the same twenty samples goes to
+34% on the heavier object and makes the lighter one worse (158%). The GP has no mechanism and
+stays where it was.
+
+<Figure src="/media/subsea-lab/learn_energy.png" width={100} alt="Left, grouped bars on a logarithmic axis of prediction error over residual for four models on six sets: on the same flight all but the GP are below 4 percent; in another current the three numbers are lowest at 3 percent; on the 2 kilogram and 0.3 kilogram objects every bar is at 50 and 240 percent; after adaptation the three numbers drop to 5 percent on both, the passive model to 7 and 18, the free network to 34 and 158, the GP does not move. Right, a histogram on a logarithmic count axis of the power each model puts into the system at a thousand random states: the passive model's values are all negative, down to minus 40 watts and beyond; the free network's are spread from minus 25 to plus 30 watts with half of them positive; the GP's are all exactly zero">
+
+Left: each model's prediction error over the residual it explains, on the training flight,
+in another current, on two objects never seen, and on the same two after two seconds of
+adaptation. Right: the power the learned part puts into the system at a thousand random
+states far from any trajectory
+
+</Figure>
+
+**The energy balance.** The property the structure was built for is tested where an optimizer
+would test it: at a thousand random states drawn around the mission's (velocities to twice
+the mission's, every joint angle, every attitude), not on any trajectory. The power the
+learned part delivers, $\boldsymbol\zeta^\top \mathbf{r}$, is positive at half of them for
+the free network, up to 30 W, a tenth of the thrusters' total; the plant would be fed energy
+from nothing there, which is what an optimizer looking for a cheap way to the reference will
+find. The passive model's dissipative part is negative at every one of the thousand states
+(the most it ever gives back is zero), as the construction says it must; on the mission's
+flights it takes out 0.05 W on average. The GP's power is exactly zero at every random state:
+its prior mean takes over a few length scales from the data and the model vanishes, which is
+safe in the sense that nothing is invented, and useless in the sense that nothing is known,
+and its variance says which. That is the three answers to chapter 9's question in one figure:
+a free network invents energy where it has not been, a GP invents nothing and knows nothing,
+and a passive model cannot invent energy anywhere, by construction and not by training.
+
+## 7.4 Inside the optimizer
+
+Chapter 9's NMPC failed after the grasp because its model did not know the object; here the
+same question is put with each model inside. The controller is a vehicle NMPC on the CasADi
+twin: thirteen states (position, attitude, twist), the arm's four joints as known inputs over
+the horizon (the mission's targets, which the servos of chapter 5 follow), eight intervals of
+0.1 s by multiple shooting, the tip's distance from its reference in the cost with the
+attitude, the velocities and the thrust, the thrusters' limits as bounds, solved by ipopt
+from the shifted previous plan. The identified model has no residual; each learned model's
+vehicle rows sit inside the integrator (the passive one's added mass on the left-hand side).
+The plant carries the object from the grasp state of chapter 5's flight through the lift and
+the return, 30 s, with the mission's current; the controller sees the true state. Every
+model is as trained on the 1 kg object; the 2 kg case is the object none of them knows.
+
+A solve that does not converge holds the last wrench and leaves its iterate as the next warm
+start. That policy is part of the result, because it was not the first one tried. With an
+iteration limit of 25 and the unconverged iterate applied anyway, cold-restarting after it,
+the free network survived on unconverged plans (110 failed solves of 301, $22^\circ$ of pitch) and
+the passive model pitched the vehicle to $75^\circ$; with the limit of 25 and the wrench held, both
+fell away from the first solve (every solve failed, the vehicle 1.5 to 4.5 m off), because
+the first cold solve of a model with a network inside needs 45 iterations where the three
+numbers need 14. The runs below use a limit of 100.
+
+<Figure src="/media/subsea-lab/learn_nmpc.png" width={100} alt="Left and middle, the tip's error from its reference over mission time from 32 to 62 seconds under the NMPC with each model inside, carrying 1 and 2 kilograms. With 1 kilogram the identified model and the GP peak at 19 centimetres at the grasp and settle at 1.7; the three numbers and the passive model peak at 14 and settle at zero; the free network peaks at 40 and has a second peak of 9 at the lift. With 2 kilograms every curve peaks above 30 at the grasp, the free network and the passive model leave the 40 centimetre axis around 36 and 40 seconds, and all settle between 1 and 3 centimetres. Right, mean ipopt solve time per model on a logarithmic axis with the worst solve marked: 0.6 and 0.7 seconds for the identified model and the three numbers, 3.1 for the free network, 2.2 for the passive model, 1.2 for the GP, all above the dashed 100 millisecond budget; the worst solves reach 16 to 26 seconds for the models with a network or a GP inside">
+
+The retrieval under the NMPC with each model inside: the tip's error from its reference
+carrying the mission's object (left) and a 2 kg object none of the models knows (middle);
+the mean ipopt solve time and the worst one against the $10\ \text{Hz}$ budget (right)
+
+</Figure>
+
+**What it shows.** Carrying the object it was trained on, the model that knows it is what
+matters, and how it knows it does not: the three numbers and the passive model hold the tip
+to 2.9 cm rms (14.4 cm at the grasp's instant, before any controller can react) and the
+pitch to $2^\circ$, and finish on the reference to a millimetre; the identified model, with no
+residual, lets the grasp pitch the vehicle $17.6^\circ$ and holds the tip to 3.9 cm with a standing
+1.7 cm error, the object's weight that an NMPC without integral action never learns; the
+GP, whose prediction vanishes a few length scales from its data, does exactly what the
+identified model does, to a tenth of a millimetre. The free network, the most accurate model
+on the training flight, is the worst controller: 6.0 cm rms, 40 cm at the grasp, $31^\circ$ of
+pitch, eight solves that did not converge. It is chapter 9's result reproduced in three
+dimensions, milder because the wrench is bounded and the attitude is in the cost: the
+optimizer finds the states where the network is wrong, and they are near the plan.
+
+The passive model's solves cost three times the three numbers' (1.8 s against 0.7 s per
+solve on this laptop, under load; 3.4 s for the free network, 0.6 s for the identified
+model), the price of a network and an implicit mass inside the integrator and its exact
+Hessian. None of the five meets the 100 ms budget of a $10\ \text{Hz}$ loop; the three numbers are
+seven times over it, the networks twenty to thirty. Real-time iteration or a compiled
+solver would close most of that gap for the models without a network; the chapter reports
+the ipopt numbers because they are the ones measured.
+
+With the 2 kg object, which no model knows, every controller is wrong by the same 7 N of
+weight, and none is good: 5.3 cm rms and $16^\circ$ for the three numbers (still the best, because
+a model that is wrong by a scalar is wrong smoothly), 8.5 cm and $27^\circ$ for the identified
+model, 8.6 cm and $43^\circ$ for the free network, and 8.8 cm and $50^\circ$ of pitch for the passive
+model, with ten solves that did not converge. The certificate held, in the sense that the
+model did not invent energy; it did not hold the vehicle, because passivity is a statement
+about the model's energy, not about its accuracy, and the dissipation its network learned on
+the 1 kg flight is as wrong at the 2 kg states as any other extrapolation. What the structure
+offers here is the adaptation of section 7.3, three numbers from two seconds, which chapter 8
+puts inside this controller.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 7.1 | the residual | after chapter 2 the model's error is the object: 6.85 N of heave, 2.5 N m of pitch, 1.3 N m at the shoulder, zero before the grasp |
+| 7.2 | four models | three numbers by least squares; a free network; a passive model whose added mass is a square and whose dissipation is a square, with a storage function that proves it cannot put energy in; a sparse GP with a zero prior |
+| 7.3 | on and off the data | all physics-bearing models within 4% in a new current and the three numbers best of them; a new object defeats all of them until adapted, when the three numbers land at 5% in two seconds and the networks do worse; the free network puts energy in at half of all random states, the passive one never, the GP vanishes |
+| 7.4 | in the NMPC | with the known object, the three numbers and the passive model hold the tip to 2.9 cm and the pitch to $2^\circ$, the identified model 3.9 cm and $17.6^\circ$, the free network 6.0 cm and $31^\circ$ with failed solves (chapter 9 reproduced); with an unknown object all are wrong and the passive model's network is wrong fastest ($50^\circ$); a network inside triples the solve time, and nothing meets 100 ms |
+
+What we learned:
+
+- After a good identification the residual is physics with three unknown numbers, and the
+  numbers beat the networks everywhere but on the flight they were trained on. Learning
+  earned nothing here that least squares did not; what the structure earned is a certificate.
+- Passivity by construction holds where it was never trained: a thousand random states, zero
+  violations, at no measurable cost in accuracy on the data. A free network of the same size
+  creates energy at half of them. The certificate is the model's, not the training's, and it
+  is what an optimizer needs.
+- Inside the optimizer the certificate is necessary and not sufficient. The passive model
+  flies the retrieval as well as the physics it contains; the free network, more accurate
+  on its data, is the worst controller of the five. But a passive model that is wrong is
+  still wrong, and when the object changes the structure does not save the flight; what
+  saves it is knowing the object, and the way to know it is three numbers.
+- The failure policy of the NMPC decided the outcome as much as the model did, and an
+  optimizer with a network inside needs three times the iterations and the time. Those are
+  results of this chapter, not footnotes to it.
+- Nothing trained on one object knows the next one. Adaptation is where structure pays: three
+  numbers re-fit in two seconds, a network of thousands cannot, and a GP has no handle at all.
+  That is chapter 8.
+
+**Back to the [project page](/projects/subsea-lab/).**

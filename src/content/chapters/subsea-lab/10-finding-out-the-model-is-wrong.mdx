@@ -1,0 +1,268 @@
+---
+project: subsea-lab
+number: 10
+title: "Finding out that the model is wrong"
+summary: "Monitors with a detection time against a time to harm: a gust from the filter's innovations, an object heavier than planned from the energy balance and the adapter, and the closing summary of the report."
+---
+import Figure from '../../../components/Figure.astro';
+
+Every chapter so far has lived with a model that is wrong somewhere: the coefficients within a
+few percent, the current a few centimetres per second behind, the pose within a bound that
+holds nine times in ten. Each was a floor the next chapter accepted. This chapter is about the
+cases that are not floors but faults: the water does something the model did not allow for,
+and the question is not how wrong the model is but how soon the vehicle finds out, and what it
+does then. The plan names three monitors and three faults. This first part builds the one
+chapter 6 asked for: the gust the filter has not seen yet, caught by the filter's own
+innovations, and fed to the shield's budget. The energy-balance monitor of chapter 7's learned
+model and the object heavier than trained wait for those chapters; the report's closing
+summary waits for them too.
+
+The code is in `src/subsea_lab/monitors.py`; the numbers come
+from `scripts/evaluate_monitors.py`.
+
+## 10.1 A statistic the vehicle can compute
+
+Chapter 6 measured the cost of not knowing the current: two centimetres of standoff per
+0.1 m/s of uncertainty in still water, ten in a 0.4 m/s flow. Budgeting the mission's gusts
+blind, at 0.3 m/s, kept the vehicle out of the keep-out zone in every flight and cost 20 cm of
+reach and three grasps in eight. Not budgeting them cost a violation in five flights of eight.
+What the mission needs is to pay the wide budget only while a gust blows, which needs to know
+that one does.
+
+The filter of chapter 3 already produces the signal. At every DVL update it computes the
+normalised innovation squared, the mismatch between what the model predicted and what the
+sensor measured, weighted by what the filter believed its uncertainty to be. Under the model
+that number is chi-square with the measurement's dimension (four, with the pressure sensor);
+when the water accelerates the vehicle in a way the model did not predict, it is not. The
+**monitor** sums the last ten of them, a second of data, and compares the sum with the
+chi-square quantile at 99.9% for forty degrees of freedom, 73.4: a model that is right exceeds
+it one second in a thousand. When it is exceeded the monitor is **raised** for three seconds,
+and while raised the shield of chapter 6 keeps its barrier against the wide ball of current,
+0.3 m/s, instead of the narrow one, 0.1 m/s. That is the whole mechanism: a statistic, a
+threshold, a hold, a switch.
+
+Before any gust, a probe: in the mission's water the DVL statistic sums to between 14 and 21
+(the filter is a little conservative, as chapter 3 found); under a 0.35 m/s gust it goes to
+between 90 and 260 within a second.
+
+Three budgets to compare it with: the narrow one throughout (chapter 6's flights), the wide one
+throughout (chapter 6's safe-but-far case), and the **truth as monitor**, the same switch
+driven by the gust itself, which is the ceiling: the best any detector could do. The flights
+are chapter 6's, with the same eight gusts of 0.1 to 0.4 m/s at random moments of the work and
+the same turbidities, the station on the boundary and the camera's bound as the margin. Each
+monitor is scored by its **delay**, the time from the gust's onset to the raise, against the
+**time to harm**, the time from the onset to the boundary crossing on the narrow budget.
+
+## 10.2 Detection time against time to harm
+
+<Figure src="/media/subsea-lab/mon_trace.png" width={100} alt="Three panels over the mission for the flight with the strongest gust, 0.4 metres per second at 29 seconds, the gust shaded. Top, the monitor's statistic on a logarithmic axis: between 14 and 35 throughout, under the dotted line at 40 that a correct model would average, with two peaks to 180 and 260 at the gust's onset and end that cross the dashed threshold at 73; the raised marks run from 0.8 seconds after the onset to 3 seconds after the end. Middle, the true clearance: the narrow budget stands at 7 centimetres and is pushed to minus 8; the monitored one follows it to minus 7, the raise coming too late to move it; the truth as monitor backs the vehicle to 15 centimetres at the onset and is pushed only to plus 3; the wide budget stands at 20 and dips to 3. Bottom, the current rising from 0.2 to 0.6 metres per second and the monitored budget stepping from 0.1 to 0.3 at the raise and back three seconds after the gust">
+
+The strongest gust, monitored: the monitor's statistic against its threshold with the raises
+marked (top); the true clearance under the narrow budget, the monitored one, the truth as
+monitor and the wide budget (middle); the current and the budget the monitor set (bottom)
+
+</Figure>
+
+<Figure src="/media/subsea-lab/mon_rates.png" width={100} alt="Four panels, every flight a point against its gust from 0.1 to 0.4 metres per second. First, the share of the working time inside the keep-out: zero for the wide budget and the truth as monitor at every gust; the narrow budget 3 percent at 0.28 and 13 to 16 at 0.31 and 0.4; the monitored one zero at 0.28 and 12 at the two strongest. Second, the least clearance: the wide budget between 3 and 15 centimetres, the truth as monitor between 2 and 5, the narrow and monitored budgets between plus 4 and minus 8 with the monitored one slightly higher. Third, the tip at the grasp: below 1.3 centimetres for the narrow budget, 4 to 18 for the wide one, up to 7 for the monitored and 25 for the truth as monitor in the flight whose gust falls on the grasp. Fourth, the monitor's delay after the gust's onset, 0.8 to 1.4 seconds for gusts above 0.24 and 4 seconds at 0.21, against the time to harm on the narrow budget, 1.0 to 1.15 seconds, drawn as hollow squares">
+
+Every flight against its gust: the share of the working time inside the keep-out, the least
+clearance and the tip at the grasp for the four budgets; and the monitor's delay against the
+time to harm on the narrow budget
+
+</Figure>
+
+| budget | flights with a violation | time inside, mean | least clearance, mean (worst) | standoff kept | tip at the grasp, mean (worst) | fallback |
+|---|---|---|---|---|---|---|
+| narrow, 0.1 m/s throughout | 3 of 8 | 4.0% | $-0.1$ cm ($-8.4$) | 6.9 cm | 0.7 cm (1.3) | 5.6% |
+| wide, 0.3 m/s throughout | 0 of 8 | 0.0% | 11.1 cm (2.7) | 19.9 cm | 6.0 cm (18.0) | 8.7% |
+| monitored: narrow, wide when raised | 2 of 8 | 3.0% | 0.3 cm ($-6.7$) | 9.2 cm | 1.5 cm (7.1) | 9.6% |
+| the truth as monitor | 0 of 8 | 0.0% | 4.1 cm (2.0) | 10.8 cm | 4.0 cm (24.8) | 8.5% |
+
+| | mean | range |
+|---|---|---|
+| monitor's delay after the gust's onset (gusts above 0.24 m/s) | 1.0 s | 0.8 to 1.4 s |
+| time to harm on the narrow budget (the three flights that crossed) | 1.1 s | 1.0 to 1.15 s |
+| time raised outside the gust (false alarms) | 3.6% | 0 to 5.4% |
+
+What it shows:
+
+- **The monitor sees the gust in under a second**, for every gust strong enough to matter: 0.8
+  to 1.4 s after the onset for the five gusts above 0.24 m/s, never for the two below 0.17,
+  which never threatened anything, and once after 4 s for the 0.21 m/s gust, harmless too.
+  The statistic peaks twice, at the gust's rise and at its fall, which is what an innovation
+  should do: the model is wrong while the water changes, not while it blows steadily. It is
+  raised 3.6% of the time outside the gusts, on the approach's and the grasp's transients.
+- **In under a second is not soon enough, by half a second.** On the narrow budget the three
+  gusts that crossed the boundary did so 1.0 to 1.15 s after their onset; the monitor raised
+  at 0.8 to 0.84 s on those flights, and the shield, now asking for 18 cm of standoff instead
+  of 7, needs about a second more to move a vehicle that the water is pushing the other way.
+  The monitored budget saved the 0.28 m/s flight (plus 0.5 cm where the narrow budget had
+  minus 0.6) and lost the 0.31 and 0.40 ones by 1 and 7 cm, against 2 and 8 without it. Two
+  flights of eight instead of three, 3% of the time inside instead of 4%.
+- **The truth as monitor shows what the delay costs.** Switched at the onset, the shield backs
+  the vehicle to 15 cm before the push arrives and no flight crosses, with 2 cm to spare at
+  the worst. The difference between that and the monitored flights is the delay alone: the
+  same shield, the same budget, 0.8 s later. A monitor that predicted the gust from its first
+  tenth of a second, or a shield that backed off faster than its exponential pole allows,
+  would close that gap; this one halves the violations and does not close it.
+- **Every budget that is safe takes the grasp.** The wide budget stands 20 cm off and misses
+  the handle by 6 cm on average; the truth as monitor stands 11 cm off and, in the one flight
+  whose gust falls on the grasp, backs away by 25 cm at the moment the jaws close. The monitor
+  pays the same price when it is raised during the grasp (7 cm at worst). Chapter 6's sentence
+  stands: safety against the water is bought with reach, and the monitor only decides when to
+  pay.
+
+## 10.3 The energy the model cannot account for
+
+Chapter 7 built a learned model that cannot put energy into the system, and asked for a
+monitor that says when the plant does something the model's energy balance forbids. The
+monitor lives on chapter 8's stream: ten times a second after the grasp, from the raw
+sensors, the force the designer's model cannot explain, $\mathbf{r}$, and the generalized
+velocity $\boldsymbol\zeta$. The power that force puts into the system is
+$\boldsymbol\zeta^\top \mathbf{r}$; the power chapter 7's passive model predicts is
+$\boldsymbol\zeta^\top \hat{\mathbf{r}}$; the **statistic** is the energy the model
+cannot account for over the last second, the absolute value of the integral of the
+difference. It is calibrated, not derived: three missions with the object the model was
+trained on give the statistic's distribution under a model that is right, and its
+quantile at 99.9% is the threshold, 0.76 J. A model that is wrong about the
+object by its weight does work the model does not expect whenever the tip moves vertically,
+and the statistic grows.
+
+The second monitor watches chapter 8's adapter instead of chapter 7's model: the
+innovation of every sample against the three numbers' prediction, normalised by the
+recursion's own covariance and the sensors' noise, summed over the last second. A model
+that is right is surprised by noise only; an object the numbers have not caught up with is
+surprised every sample. Its threshold is calibrated the same way, a sum of 1618.
+
+The **fault** is chapter 8's: an object heavier than the one the mission was planned for
+(1 kg; 1.4, 2 and 3 kg are tried, and a buoyant one), carried by chapter 5's station LQR
+and the arm's servos, whose integral needs five seconds to carry twice the weight it was
+tuned for. The **harm** is chapter 9's: the tip more than 10 cm from its lifted target
+once the lift is over, which is where every controller with integral action failed the 2 kg
+object. The **response** is to wait: a raise of either monitor pushes the end of the lift,
+and everything scheduled after it, six seconds past the raise, so that the integral has the
+time the plan did not give it. It is the freeze of arm-lab's chapter 12 in water: not the
+learning that is frozen but the plan.
+
+<Figure src="/media/subsea-lab/mon_faults.png" width={100} alt="Three panels over mission time from 32 to 77 seconds, the scheduled lift shaded. Top, on a logarithmic axis, the energy the model cannot account for over the last second: the 1 kilogram object stays under the dashed threshold at 0.76 joules until it crosses it once near 40 seconds; the 1.4, 2 and 3 kilogram objects cross it within a second of the grasp, the 3 kilogram one stays above it at 1 to 10 joules for the whole flight and the two lighter ones fall back under it within two seconds; the buoyant object crosses it at 1.6 seconds. Middle, the adapter's innovations summed over the last second: the planned object sits between 100 and 1600 and crosses the dashed threshold at 1618 once near 40 seconds; the 1.4 and 2 kilogram objects jump to 2500 to 3000 within a second of the grasp, fall back and hover around the threshold from 40 seconds on; the 3 kilogram one jumps to 10000, peaks at 60000 and stays two to five times above the threshold; the buoyant object stays below. Bottom, the tip's error from the lifted target: as scheduled, the 1 kilogram object settles at 3.7 centimetres, the 1.4 at 5.8, the 2 kilogram at 10.7 and the 3 kilogram at 26; with the lift stretched to 41 seconds, dotted lines mark the new end, the 1.4 kilogram error falls to 0.4, the 2 kilogram to 6 and the 3 kilogram to 20 centimetres; the buoyant object sits at 1.5 either way">
+
+The grasp with five objects: the energy the model cannot account for (top) and the
+adapter's innovations (middle) against their thresholds, and the tip's error from the
+lifted target (bottom), as scheduled and with the lift stretched on a raise
+
+</Figure>
+
+**What it shows.** Both monitors see a heavier object within a second of the grasp. For 1.4, 2 and 3 kg
+the energy statistic crosses its threshold at 1.0 s after the grasp and the adapter's at
+1.0 s, two seconds before the harm (the lift's end at 3 s, where the 2 kg object is 10.7 cm
+from its target and the 3 kg one 26 cm). The planned object raises neither during the lift;
+both raise it once, at 8 s, when the return starts and the vehicle accelerates with the
+object, a false alarm the calibration's three missions did not cover and the response, which
+listens only during the scheduled lift, ignores. The buoyant object, 8 N wrong the other
+way, raises the energy monitor at 1.6 s and the adapter's never: the adapter's innovations
+scale with the object's forces, and a light one is quiet, which is also why the adapter's
+statistic does not stay clear for a heavy one (around the threshold of 1618 for 2 kg, two to
+five times above it for 3 kg, for the rest of the flight) and the response has to be a wait
+bought once rather than a wait until the monitor is satisfied. The energy monitor does not clear either, for a better reason:
+chapter 7's model is fixed and stays wrong about a 2 kg object for good, and the monitor says
+so.
+
+The response is what the monitors are for. Stretching the lift six seconds past the raise
+turns the 1.4 kg object's 5.8 cm into 0.4, and the 2 kg object's 10.7 cm, chapter 9's
+failure, into 6.0, a success by the same threshold: the servo's integral, given nine seconds
+instead of three, carries twice the weight it was tuned for. The 3 kg object is beyond the
+response: 20 cm after the stretched lift against 26 after the scheduled one, because the
+elbow's torque limit, not its integral's time, is what the weight exceeds, and no waiting
+helps a joint that cannot lift. That is the monitor's honest boundary: it can buy time, and
+time is worth exactly what the controller can do with it.
+
+## 10.4 What still waits
+
+- **The turbidity rising past the calibration set** is chapter 4's coverage monitor; the
+  camera's innovations against the bound are logged in every flight of chapter 6 and were
+  never outside their band, because no flight left the calibrated water. The fault needs
+  water the bound was not calibrated for, and the monitor needs a flight in it.
+- **A monitor on the certificate itself.** The energy monitor above compares the model with
+  the measurement; a monitor on chapter 7's passivity would compare the measurement with
+  the certificate, and raise when the plant is seen to put in energy a passive residual
+  could never explain. It is the same statistic without the absolute value and with the
+  model's dissipative part as the only term, and it waits for a fault that creates energy,
+  which a heavier object does not.
+
+## 10.5 What scaled, and what the water changed
+
+The report set out from three labs and one question: whether the discipline that worked on
+a pendulum, a house and an arm would carry under water, where standing still is not an
+option. Ten chapters later, this is the account.
+
+**What scaled from the pendulum.** Chapter 9 of pendulum-lab ended with five hypotheses
+and every one of them held in three dimensions: the model is the first thing to fix and the
+last to trust (chapters 1 and 2: the textbook model is twice too fast and the identified one
+is within a few percent, and chapter 9's optimizers diverge where it is wrong); the
+estimate is the limit (chapter 3's tip floor, 4.2 cm on the estimate against 0.5 on the
+truth, and chapter 4 buying it down to 1 cm with a camera); learning helps where it has
+structure to stand on (chapters 7 and 8: three numbers beat two networks and a Gaussian
+process off the training flight, and a latent trained on 24 objects answers nonsense on the
+25th kind); a robust filter pays in reach (chapter 6: two centimetres of standoff per
+0.1 m/s of uncertainty, ten in a 0.4 m/s flow); and a free residual network inside an
+optimizer diverges (chapter 7, reproduced; chapter 9, reproduced again by a model-free
+policy that never flew a mission).
+
+**What scaled from the arm.** arm-lab's barriers at a kilohertz became chapter 6's shield
+at twenty hertz with the current as the disturbance and station keeping as the fallback,
+and kept the keep-out zone in every flight whose gust it was budgeted for; arm-lab's
+learned-bound-with-trigger became chapter 4's conformal bound with a gate and chapter 10's
+monitors with a hold; arm-lab's finding that a learned policy does not beat a classical
+controller behind the layer became chapter 9's, at a smaller budget and with the same
+answer. thermal-lab's physics-first identification became chapter 2's safe active
+identification and chapter 8's three numbers, which is the same idea at a tenth of a second.
+
+**What the water changed.** Three things, which are the report's three questions. Safety
+has no stop: chapter 6's barrier is only as good as what is known about the water, and
+chapter 10's first monitor finds a gust half a second too late to be free; the safe state is
+a controller, and a controller has a time to act. Perception is a bound, not a fix: the
+camera's pose is worth four times the USBL's only with a calibrated statement of when it
+is not, and chapter 4's gate is what made the bound usable rather than the bound itself.
+And the object is the thing nobody measured: after every model in the report, the residual
+is the thing in the jaws, three numbers nobody knew, and finding them in two seconds from
+the raw sensors is worth more than any network trained in advance. The last thing the water
+taught is in chapter 5: the grasp is an impact, and a model of it is a model of the wrist.
+
+**What the report would do next.** Real-time iteration for the whole-body optimizer, whose
+solve time, not its model, keeps it out of the loop; the three numbers fed to the servo's
+feedforward, the missing controller of chapter 9's gallery; the estimator in the loop of
+every controller, which only chapters 3, 4 and 6 flew; a coverage monitor in water the
+bound was not calibrated for; and hours, not minutes, for the policies of chapter 9, which
+the comparison deserves and the laptop could not give.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 10.1 | the statistic | the filter's DVL innovations, summed over a second against a chi-square quantile, are a gust detector the vehicle already has; a switch on the shield's budget is the response |
+| 10.2 | detection against harm | raised 0.8 to 1.4 s after a gust's onset, 3.6% of the time otherwise; the boundary is crossed at 1.0 to 1.15 s on the narrow budget; the monitor halves the violations and the truth as monitor removes them, so the half second of delay is the whole difference |
+| 10.3 | the model after the grasp | the energy monitor on chapter 7's passive model and a monitor on chapter 8's adapter raise 1.0 s after the grasp for a 1.4, 2 or 3 kg object, two seconds before the lift's harm; a wait of six seconds bought on the raise turns the 2 kg lift from 10.7 cm to 6.0, a success, and cannot help the 3 kg object, whose elbow cannot lift it; a false alarm when the return starts, ignored |
+| 10.4 | what still waits | the coverage monitor needs water the bound was not calibrated for; a monitor on the certificate needs a fault that creates energy |
+| 10.5 | the closing summary | the pendulum's five hypotheses held in three dimensions; the arm's barriers, bounds and gallery carried; the water changed safety into a race, perception into a bound, and the object into the thing nobody measured |
+
+What we learned:
+
+- The gust that breaks chapter 6's barrier is visible in the filter's own innovations within a
+  second of its onset, at no cost in sensors and with a false alarm 4% of the time.
+- A second is half a second too long: the vehicle needs about a second to move to the wider
+  standoff, and the water needs one to push it over the boundary. Detection time against time
+  to harm is a race the monitor loses by a little, which the truth as monitor shows it could
+  win.
+- Every budget that keeps the vehicle out during a gust gives up the grasp that falls in it;
+  the monitor's value is to give it up only then.
+- A heavier object is visible a second after the grasp in two places the vehicle already
+  computes, the energy its learned model cannot account for and the innovations of its
+  adapter, two seconds before the lift fails. The response that works is to wait, once;
+  what the wait is worth is what the controller can do with it, which is everything for
+  twice the weight and nothing for three times, where the joint, not the plan, is the
+  limit.
+- The report's one finding, in a sentence: under water the model is wrong about the water
+  and the object, both can be found out in about a second from what the vehicle already
+  measures, and what that second is worth depends on whether the controller can wait.
+
+**Back to the [project page](/projects/subsea-lab/).**

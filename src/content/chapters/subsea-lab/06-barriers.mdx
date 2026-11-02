@@ -1,0 +1,242 @@
+---
+project: subsea-lab
+number: 6
+title: "Safety when the safe state moves"
+summary: "Safety when the safe state moves: barriers in the structure frame under a current, the reach budget, the perception bound as a breathing margin, and what breaks the barrier."
+---
+import Figure from '../../../components/Figure.astro';
+
+arm-lab's guarantees all rested on a stop: a barrier kept the robot inside a set from which
+standing still was safe, and standing still was always possible. Under water there is no stop.
+The current never stops, thrust is finite, and the fallback, when the task must be given up, is
+itself a controller that holds station in moving water. pendulum-lab's chapter 9 built the
+planar version and found that the safety filter kept its margin only where the estimator put
+the vehicle, that a robust margin paid for its safety in reach, and that knowing the disturbance
+better was worth more than a bigger margin. This chapter builds the filter in three dimensions,
+in the structure's frame, with the margin set by what the camera knows, and asks whether it
+keeps the stated safety rate while giving back the reach a fixed margin gives up.
+
+The code is in `src/subsea_lab/barriers.py`; the numbers
+come from `scripts/evaluate_barriers.py`.
+
+## 6.1 Barriers under a disturbance that never stops
+
+**The barrier.** The keep-out zone is the volume within 30 cm of the structure's face; the
+hull's bow, 23 cm ahead of the centre of gravity, must stay out of it:
+
+$$
+h(\mathbf x) = (n_{\mathrm{wall}} - 0.30) - n_{\mathrm{bow}}(\mathbf x) \geq 0,
+$$
+
+with $n$ the north coordinate. That puts the boundary 7 cm ahead of the mission's station and
+leaves the camera, 5 cm behind the bow, enough range to see the markers from the boundary. A
+depth band of a metre is kept the same way. These are functions of the pose, two derivatives
+away from the thrust, so the constraint that the thrusters can act on is on $\ddot h$, which the
+identified model of chapter 2 gives as an affine function of the wrench. Two conditions are
+kept on each barrier, both linear in the wrench:
+
+- the exponential barrier of relative degree two, $\ddot h + k_1 \dot h + k_2 h \geq 0$ with both
+  poles at $2.5\ \text{s}^{-1}$, which holds the vehicle off the boundary against a steady
+  push;
+- the braking barrier on the clearance that would be left after stopping,
+  $h_b = h - \tfrac{\dot h^2}{2a}$ with $a = 2\ \text{m/s}^2$, below what the thrusters can
+  give so that the lag and the water have room, which refuses an approach the thrust could
+  not stop in time. The exponential condition alone asks for gentle braking and, in the
+  first run of this chapter, let the vehicle arrive at 0.7 m/s and go 80 cm through.
+
+**The disturbance.** The current enters $\ddot h$ through the drag. The filter's estimate of the
+current enters the model, and the constraint is kept against every current within a ball of
+radius $\bar w$ around it: the worst change of $\ddot h$ over that ball is subtracted (the
+input-to-state-safety margin, Kolathaya and Ames). $\bar w$ is either three sigmas of the
+filter's own current uncertainty or a chosen value; the chapter uses 0.1 m/s.
+
+**The shield.** At every control step a quadratic programme moves the controller's three
+forces as little as possible so that every condition holds within 60% of the thrust (the rest
+keeps the attitude: at full surge the horizontal thrusters, below the centre of gravity, pitch
+the vehicle over). The moments are left to the controller: a barrier on the bow can be met by
+turning the vehicle away, which a norm on the wrench finds cheap and the task finds ruinous;
+the second run of this chapter ended with the vehicle facing the other way and the arm 1.3 m
+from the handle. When no force within the budget satisfies the conditions, the **fallback** is
+full thrust away from the structure, and the event is counted.
+
+**The reach budget.** Told to stand with its bow on the boundary, the vehicle on its true state
+stops where the shield lets it, and that distance is what safety costs the task.
+
+<Figure src="/media/subsea-lab/bar_budget.png" width={100} alt="Two panels. Left, the clearance the shield keeps against the current toward the wall, from 0 to 0.4 metres per second, one line per ball of current the barrier is kept against: zero at every current when the ball is zero, rising from 1 to 5 centimetres for a 0.05 ball, 2 to 10 for 0.1, 7 to 20 for 0.2 and 14 to 31 for 0.3, each line steepening with the current. Right, the same as a grid of the least clearance ever had, from zero in the bottom row to 24 centimetres at the top right, with no fallbacks anywhere">
+
+The standoff the shield keeps when the task asks for the boundary: against the current toward
+the wall, for each ball of current the barrier is kept against (left), and the least clearance
+ever had (right)
+
+</Figure>
+
+| current toward the wall | ball 0 | 0.05 m/s | 0.1 m/s | 0.2 m/s | 0.3 m/s |
+|---|---|---|---|---|---|
+| 0 | 0.0 cm | 0.8 cm | 2.2 cm | 6.8 cm | 13.6 cm |
+| 0.1 m/s | 0.0 cm | 1.7 cm | 3.4 cm | 7.9 cm | 14.7 cm |
+| 0.2 m/s | 0.0 cm | 2.8 cm | 5.7 cm | 11.3 cm | 18.2 cm |
+| 0.3 m/s | 0.0 cm | 4.0 cm | 7.9 cm | 15.9 cm | 23.8 cm |
+| 0.4 m/s | 0.0 cm | 5.1 cm | 10.2 cm | 20.4 cm | 30.7 cm |
+
+What it shows:
+
+- **Known, the current costs nothing.** With the water's velocity known and nothing to pay
+  for, the shield holds the bow on the boundary to a millimetre at every current up to
+  0.4 m/s, never once inside and never once falling back: 60% of the thrust is enough to
+  hold against 0.4 m/s and to stop an approach at 0.15 m/s on the braking barrier.
+- **Unknown, it costs reach in proportion to how unknown, times how strong.** Each 0.1 m/s of
+  current the shield must allow for costs 2 cm of standoff in still water and 10 cm in a
+  0.4 m/s current: the drag is quadratic, so the same uncertainty means a larger force when
+  the flow is already fast. That is the reach budget, and it says what chapter 3's current
+  estimate (4 cm/s RMS, three sigmas about 0.12 m/s) buys: a standoff of about 3 cm at the
+  mission's 0.2 m/s, against 18 cm if the gusts of 0.3 m/s had to be allowed for blind.
+- **The budget is spent before the thrust is.** No case fell back: the standoff grows faster
+  than the thrust runs out, because the exponential barrier keeps the vehicle where a worst
+  case could still be braked. The thrust limit shows elsewhere: in 6.2, under a gust the
+  filter did not budget for.
+
+## 6.2 Barriers in the structure's frame, with margins that breathe
+
+The barrier above is evaluated on the *estimated* pose, so the true clearance is the estimated
+one minus the estimate's error. Chapter 3 found that error to be 2.5 cm RMS and 5 cm at worst
+on the USBL; chapter 4 replaced the fix with a pose relative to the structure and a bound on
+its error that the vehicle computes from what it sees. The barrier is therefore defined on
+chapter 4's pose, in the structure's frame, and applied to $h - m$ with a margin $m$ that is
+one of:
+
+- **none**: the estimate is trusted as it is;
+- **fixed**: 10 cm, twice chapter 3's worst USBL error, the robust margin of chapter 9;
+- **the bound**: chapter 4's $q_{0.9}$ at the latest camera fix, 7 mm from the station in clear
+  water and up to 16 cm when the markers are small, falling back to the fixed 10 cm when the
+  camera gives nothing.
+
+The mission is flown with the station on the boundary, "stand as close as you may", so that
+the shield is what holds the vehicle off, under a wall-ward gust of 0.1 to 0.4 m/s at a random
+moment of the work and in water of random turbidity, eight flights per policy with the
+controller of chapter 5 acting on the estimate and the arm aiming at the handle from where the
+vehicle believes it stands. Six policies: the true state with no margin (what is physically
+possible), the USBL filter with no margin and with the fixed margin, the camera with the fixed
+margin and with the bound, and the camera with no shield at all.
+
+<Figure src="/media/subsea-lab/bar_rates.png" width={100} alt="Three panels, each flight a point against the strength of its gust from 0.1 to 0.4 metres per second, six policies. Left, the share of the working time inside the keep-out zone: the controller alone between 24 and 43 percent in every flight; the no-margin and the bound-margin shields zero up to 0.21 and 2 to 17 percent above; the two fixed-margin shields zero except 2 to 3 percent at 0.4; the true state zero throughout. Middle, the least clearance: the fixed margins between 6 and 13 centimetres except minus one at 0.4; the no-margin and bound shields between plus 4 and minus 11; the true state between 1 and 3; no shield between minus 1 and minus 9; the shield that budgets 0.3 metres per second between 10 and 15 except 3 at the strongest gust; the one on the filter's own sigmas between plus 2 and minus 10. Right, the tip's distance from the handle at the grasp: below 1.5 centimetres for every policy but the fixed margins, 2 to 9 centimetres with five of eight flights above the 3 centimetre line, and the 0.3 budget, 1 to 18 centimetres">
+
+Every flight, against the strength of its gust: the share of the working time spent inside the
+keep-out zone (left), the least clearance (middle) and the tip's distance from the handle at the
+grasp (right), per policy
+
+</Figure>
+
+| policy | flights with a violation | time inside, mean | least clearance, mean (worst) | standoff kept | tip at the grasp, mean (worst) |
+|---|---|---|---|---|---|
+| true state, no margin | 0 of 8 | 0.0% | 2.1 cm (1.0) | 6.6 cm | 0.4 cm (0.8) |
+| USBL filter, no margin | 5 of 8 | 5.7% | $-2.0$ cm ($-11.3$) | 6.0 cm | 0.7 cm (1.4) |
+| USBL filter, 10 cm margin | 1 of 8 | 0.3% | 8.1 cm ($-0.7$) | 15.9 cm | 3.6 cm (8.4) |
+| camera, 10 cm margin | 1 of 8 | 0.3% | 8.0 cm ($-1.0$) | 15.9 cm | 3.7 cm (8.7) |
+| camera, the bound as margin | 5 of 8 | 5.3% | $-1.4$ cm ($-10.8$) | 6.7 cm | 0.7 cm (1.4) |
+| camera, the bound, gusts budgeted (0.3 m/s ball) | 0 of 8 | 0.0% | 11.1 cm (2.7) | 19.9 cm | 6.0 cm (18.0) |
+| camera, the bound, the filter's own uncertainty | 3 of 8 | 4.7% | $-1.3$ cm ($-9.6$) | 4.3 cm | 0.5 cm (0.8) |
+| camera, no shield | 8 of 8 | 35.9% | $-5.1$ cm ($-9.0$) | 0.2 cm | 0.6 cm (1.0) |
+
+What it shows:
+
+- **The shield is what keeps the vehicle out.** Without it the controller, told to stand on
+  the boundary, spends a quarter to a half of the work inside the keep-out zone in every
+  flight and reaches 9 cm in; the task's reference is the hazard, and feedback does what it
+  is told. With the shield and the true state the vehicle never crosses, stands 6.6 cm off
+  (the budget for a 0.1 m/s ball of current in the mission's 0.2 m/s, as section 6.1 said it
+  would) and grasps within half a centimetre.
+- **On the estimate, the pose is not what breaks the barrier; the current is.** The no-margin
+  shield on the USBL filter and the bound-margin shield on the camera give the same flights
+  to a millimetre: no violation in any flight with a gust below 0.22 m/s, and 2 to 17% of the
+  working time inside for stronger ones, 11 cm deep at 0.4 m/s. The pose error (1 cm from the
+  camera, 2.5 from the USBL) is below the 6.7 cm standoff; what crosses the boundary is a
+  gust the shield did not budget for and the filter sees only seconds later, when the vehicle
+  has already moved. The true-state shield survived the same gusts because it knew the
+  water's velocity at once. Chapter 9's sentence returns with numbers: better knowledge of the
+  disturbance is worth more than a bigger margin.
+- **The fixed margin is safe by accident and pays for it at the grasp.** Ten centimetres,
+  chosen for the USBL's pose error, happen to absorb the excursion of a 0.3 m/s gust, so the
+  fixed-margin shields violate in one flight of eight, by a centimetre at 0.4 m/s. They stand
+  16 cm off, the arm reaches the handle stretched, and the tip is 3.6 cm from it at the grasp
+  on average and 8.7 at worst: five of eight grasps would miss a 3 cm handle. With the bound as
+  margin the standoff is 6.7 cm and every grasp is within 1.4 cm.
+- **A margin for the pose cannot stand in for a budget for the water.** The margin that
+  breathes recovered 9 cm of reach over the fixed one and kept exactly the safety the pose
+  bound promised, which is not the safety the mission needs: the two rows above the last
+  budget the gusts instead, with the shield's ball set to the gusts the flights meet, or to
+  the filter's own three sigmas, which grow when a gust arrives (chapter 3's NEES spike).
+  Budgeting 0.3 m/s buys exactly the safety promised, no flight inside and 2.7 cm to spare
+  at the 0.4 m/s gust, and pays 20 cm of standoff for it: the arm cannot reach the handle
+  from there in three flights of eight (6 cm at the grasp on average, 18 at worst), and the
+  shield falls back to full reverse in 9% of the working steps because no force within its
+  budget can honour so large a ball. The filter's own uncertainty is too small and too late:
+  three sigmas are 7 to 10 cm/s between gusts, so the shield stands 4.3 cm off and crosses
+  in three flights of eight, as the unbudgeted one did. The safety rate the mission needs is
+  bought with knowledge of the water, or with reach; the perception bound sets neither.
+
+## 6.3 One flight, two margins
+
+<Figure src="/media/subsea-lab/bar_trace.png" width={100} alt="Two panels over the mission's sixty-two seconds for the same flight, a gust of 0.28 metres per second at 31 seconds in water of turbidity 0.9, with the current drawn in grey. Top, the bound as margin: the margin steps from 16 centimetres down to 0.7 as the markers grow during the approach, the vehicle stands at six centimetres from 18 to 31 seconds with the shield active throughout, the gust pushes it to one centimetre inside the keep-out for a moment, it recovers to 15 centimetres as the gust passes, and the margin steps back up on the return; the estimated clearance lies within a centimetre of the true one throughout. Bottom, the fixed margin of ten centimetres: the same flight standing at 15 centimetres, dipping to 8 during the gust, never inside">
+
+The same flight under the bound as margin (top) and the fixed margin (bottom): the true
+clearance, the clearance the shield believes, the margin, when the shield acts, and the current
+
+</Figure>
+
+What it shows:
+
+- **The margin breathes with the water and the range.** It is 10 cm (the USBL fallback) until
+  the camera first sees the markers at 10 s, steps down through 16, 7, 4, 2 to 0.7 cm as the
+  markers grow, stays there through the work in clear water, and steps back up on the return
+  with the object. The vehicle stands where the margin and the current's budget put it: 6 cm
+  off, against 15 under the fixed margin.
+- **The estimate is honest to a centimetre**, and the shield believes it: the clearance as
+  estimated lies on the true one through the whole flight, which is why the pose margin could
+  be 7 mm. The excursion at 32 s is the gust, a centimetre inside for a second, the same under
+  both margins; the fixed margin merely started 9 cm farther away.
+- **The shield is on the whole time.** From 18 to 42 s the controller asks for the boundary
+  and the shield answers at every step: the vehicle lives on the barrier. That is the mission
+  the chapter set out to make safe, and it is the regime chapter 9 never reached in the plane.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 6.1 | barriers in a current | two conditions per barrier, exponential and braking, on the identified model's forces; known, the current costs nothing; unknown, it costs reach in proportion to its strength times its uncertainty |
+| 6.2 | margins that breathe | the shield is what keeps the vehicle out; on the estimate the pose error is not what breaks the barrier, an unbudgeted gust is; the margin that breathes recovers 9 cm of reach over the fixed one and the grasp with it; budgeting the gusts is safe and costs 20 cm and the grasp |
+| 6.3 | one flight | the margin steps from 16 cm to 7 mm with the markers and back; the estimate is honest to a centimetre; the vehicle lives on the barrier |
+
+Three threads continue:
+
+- **Where safe is, in moving water.** It is not a set the vehicle sits in but a distance it
+  keeps, and that distance is a budget: zero for what is known, two centimetres per 0.1 m/s
+  of unknown current in still water and ten in a 0.4 m/s flow. The budget is spent on the
+  current, not on the pose: a centimetre of perception bound is cheap next to a decimetre of
+  gust, and the fallback, full thrust away, was never needed inside the budget.
+- **Knowing the disturbance is worth more than a margin.** The true-state shield survived
+  every gust with a 6.6 cm standoff; the estimated one, with the same budget, crossed under
+  gusts the filter saw too late. Chapter 10's monitors (the NEES spike that announced the
+  gust in chapter 3) are the trigger that should widen the budget; chapter 7's learned
+  hydrodynamics could make the current's effect predictable sooner.
+- **The margin can breathe.** Set from chapter 4's bound, the margin went from the USBL's
+  10 cm to 7 mm when the structure was in clear view and back, and the pose it protected was
+  never wrong by more than the margin said. That is the perception-based barrier the project
+  set out to build, and the preprint candidate: the reach budget as the map of safety in a
+  current, and the breathing margin as what the camera buys.
+
+What we learned:
+
+- A barrier filter in a current keeps a standoff proportional to the current times its
+  uncertainty; with the current known it holds the vehicle on the boundary to a millimetre.
+- On an estimated state the hazard is the disturbance the filter has not seen yet, not the
+  pose error: the no-margin and bound-margin shields crossed under the same gusts, by the
+  same amounts, and the fixed margin was safe only because 10 cm happens to absorb a 0.3 m/s
+  gust.
+- The margin that breathes recovers 9 cm of standoff over the fixed margin and turns a
+  grasp that misses in five flights of eight into one within 1.4 cm in every flight.
+- Safety against the gusts themselves can be bought: budgeting 0.3 m/s of unknown current
+  gives no violation in any flight, at 20 cm of standoff, a grasp that fails in three
+  flights of eight and a fallback in 9% of the steps. What the mission needs is the water
+  known sooner, not a larger margin: that is chapter 10's trigger and chapter 7's model.
+
+**Back to the [project page](/projects/subsea-lab/).**

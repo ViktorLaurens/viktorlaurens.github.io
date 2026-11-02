@@ -1,0 +1,208 @@
+---
+project: subsea-lab
+number: 5
+title: "Whole-body control, and who should move"
+summary: "Who should move: a stock autopilot, a set-based task-priority scheme and a whole-body NMPC on one mission, the solve time against the budget, and the grasp as a MuJoCo contact beside the plant."
+---
+import Figure from '../../../components/Figure.astro';
+
+The mission has flown since the first pass of this chapter: a station LQR with integral
+action moved the vehicle, the arm's own servos moved the arm, and a schedule said when. That
+controller carried chapters 2 to 8 and it was never the question. The question is that the
+system has ten degrees of freedom for a five-dimensional task, and someone has to decide
+whether the vehicle or the arm does the work. Three controllers decide it differently: a
+stock autopilot that does not decide at all, a kinematic task-priority scheme that decides by
+a price, and a whole-body optimizer that decides by a cost. And the grasp, which every
+chapter so far took as a change in the plant's equations, becomes a contact: MuJoCo closes
+the jaws on an object with mass, buoyancy, drag and added mass that no model of the plant
+knows, and the mission carries whatever the fingers hold.
+
+The code is in `src/subsea_lab/wholebody.py` and
+`src/subsea_lab/contact.py`; the numbers come from
+`scripts/evaluate_wholebody.py`.
+
+## 5.1 Three ways to move ten joints
+
+Every controller is given the same task: the tip's position along the mission, the arm's
+plan on the station reference (stowed during the approach, to the handle in three seconds
+of reach, up by 20 cm after the grasp, to the carrying pose on the way back), with the
+thrusters' limits, the joints' limits and rates, and the keep-out zone around the structure
+to respect. They differ in what they make of the ten degrees of freedom.
+
+**The autopilot.** A PID on each of the vehicle's six axes, no model, the error integrated
+against the current; the arm's servos follow the plan's joint angles. The vehicle holds
+station and the arm reaches; nobody weighs one against the other, and the vehicle learns of
+the object only through its integral.
+
+**Set-based task priority.** A kinematic scheme in the family Pettersen's group works on
+(Moe, Antonelli, Pettersen and Teel, 2016): the tasks are ordered, the lower ones live in
+the null space of the higher ones, and the set-based tasks, the joint limits and the
+keep-out zone, are inequalities that become equalities with zero rate only when the solution
+would push them out of their set. The tip's position is the task; the vehicle's station is
+the last priority, where it fits. The pseudo-inverses are weighted: a unit of vehicle
+velocity costs `vehicle_weight` units of joint rate, and that one number is the decision of
+who moves. The scheme resolves, twenty times a second, a generalized velocity for the
+reference configuration (not the measured one, or the vehicle's error would move the
+reference and the integral action would be lost), and chapter 5's LQR and the servos track
+what it integrates. Two things it needed that the textbook version does not say: the
+pseudo-inverses of the equality tasks are damped, because an elbow nearly straight makes the
+shoulder's and the elbow's columns almost parallel and an undamped null-space step asked for
+$24\ \text{rad/s}$; and the set-based tasks are not damped, because a damped zero rate leaks into the
+set at millimetres per second.
+
+**The whole-body NMPC.** The optimizer of chapter 7 extended to the arm: the vehicle's
+thirteen states and the four joint angles, with the wrench and the joint rates as the
+inputs, eight intervals of 0.1 s, the tip's distance from its plan in the cost with the
+attitude, the velocities, the station (weakly) and the inputs, the thrusters' limits and the
+joint rates as bounds, the joint limits as state bounds, and the keep-out zone and the depth
+band as constraints at every node. The servos track the joint angles of the plan's next
+node. ipopt from the shifted previous plan, a failed solve holding the last inputs; its
+solve time is measured, as the plan asked, against the 100 ms budget.
+
+<Figure src="/media/subsea-lab/wb_controllers.png" width={100} alt="Three panels over the 62 second mission with the reach, lift and return shaded. Top, the tip's error from the plan: all four controllers under 2 centimetres until the grasp at 32 seconds, where every curve jumps, the autopilot to 23, the LQR to 21, the task-priority scheme to 19 and the NMPC to 21 centimetres; the LQR and the task-priority scheme are back under 3 within five seconds and stay there, the autopilot swings to 11 centimetres twice during the return, the NMPC swings to 14 at 47 seconds. Middle, the pitch: near zero for all before the grasp; the LQR and the task-priority scheme dip to minus 5 degrees and return; the autopilot to minus 11 and back over ten seconds; the NMPC rises to plus 6 at the grasp then sinks to minus 19 and minus 22 degrees during the return and ends at minus 8. Bottom, the thrust asked from all eight thrusters: 25 to 50 newtons before the grasp, rising to 140 to 150 during the return for the autopilot and the LQR, 125 for the task-priority scheme, and a jagged 50 to 175 for the NMPC">
+
+The mission under the four controllers with the grasp as a payload change: the tip's error
+from the plan (top), the pitch (middle) and the thrust asked from the eight thrusters
+(bottom); shaded, the reach, the lift and the return
+
+</Figure>
+
+**What it shows.** Before the grasp the four are hard to tell apart on the tip, and the
+numbers rank them: the NMPC holds the plan to 0.1 cm rms, the LQR and the task-priority
+scheme to 0.4, the autopilot to 1.5, and the time from the reach's start to the tip within
+1 cm of the handle is 2.5 to 2.6 s for three of them and 5.3 s for the autopilot, whose
+integral has to find the arm's weight. The grasp sorts them. The LQR and the task-priority
+scheme, both with integral action on the vehicle, take the 7 N in their stride: 3.7 and 3.9 cm
+of tip error after the lift, $4.6^\circ$ of pitch, back within 2 cm in 4.4 and 4.7 s. The autopilot
+pitches $11^\circ$, misses the lifted target by 10 cm and never gets back within 2 cm; its return
+is a 6 cm rms wander. The NMPC, with no object in its model and no integral action, does
+what chapters 7 and 9 said it would: 7.4 cm after the lift, never within 2 cm again, and on
+the return, where it must move the vehicle 3 m with a weight it does not know, it pitches
+the vehicle to $22^\circ$. It is also the only one that lets the vehicle wander from the
+station while the tip is on plan: 16 cm off during the station phase, because the station
+is in its cost at a low weight and the tip at a high one, and the only one that uses the
+keep-out margin: 13 cm at closest, against 24 to 26 for the others, which never ask. On
+energy the task-priority scheme is cheapest in thrust (12045 against 12935 for the LQR and
+13037 for the autopilot, in the $\sum \lvert F \rvert^{1.5}$ measure of a T200's power)
+and spends it on the joints instead (8.7 J against 5.7); the NMPC is cheapest of all in thrust
+(11396) and spends most on the joints (14.4 J), and chatters least (2.7 sign changes of a
+thruster command per second against 5.1 for the LQR, whose compensating mixer jumps the
+dead band on every small request).
+
+**The solve time.** 2.1 s per solve on average, 5.0 s at worst, over 621 solves with none
+failed, on a laptop running two such flights at once. The budget is 100 ms. The plan said
+this measurement decides the language: it does. Twenty times over, with the exact Hessian
+of a 17-state model through two RK4 substeps and eight intervals, is not a tuning problem;
+it is a generated-code problem, and real-time iteration with a compiled solver is the
+answer the chapter leaves for the gallery. What the number buys here is honesty about the
+whole-body NMPC's place in this report: a design tool and a comparison, not the controller
+that flies the mission.
+
+## 5.2 Who should move
+
+The scheme's one knob is the price of vehicle motion against joint motion. On the mission as
+flown the knob does nothing, because the handle is inside the arm's reach from the station
+and the station task, last in priority, keeps the vehicle still whatever the price: the arm
+does the whole reach for any weight from 1 to 100. To make the question real the station
+task is put 20 cm further from the wall than the plan the tip follows, so that the handle is
+beyond the arm's reach from where the vehicle is asked to stand, and someone has to move.
+
+<Figure src="/media/subsea-lab/wb_whomoves.png" width={100} alt="Three panels against the price of vehicle motion at 1, 10 and 100. Left, bars of the vehicle's path in metres and the joints' path in radians during the reach and the lift: 0.29, 0.29 and 0.28 metres against 2.24 radians at every price. Middle, the thrusters' energy near 15.5 at every price and the joints' energy at 8.0, 8.0 and 8.5 joules. Right, the tip's error while holding at about 1 centimetre and the least keep-out margin at 32 centimetres, both flat across the prices">
+
+The task-priority scheme asked to stand 20 cm behind the plan, with the vehicle's motion
+priced at 1, 10 and 100 times the joints': how far each moved during the reach and the
+lift (left), the energies (middle), the tip and the keep-out margin (right)
+
+</Figure>
+
+**What it shows.** Nothing moves with the price. At every weight the vehicle walks 0.28 to
+0.29 m forward and the joints travel 2.24 rad, the thrusters spend the same, the tip is held
+to half a centimetre, the margin is 32 cm. The reason is the geometry: with the handle 0.68 m
+from the arm's mount and the arm 0.35 m long at full stretch, the arm stretches to its
+limits (the set-based tasks activate) and the vehicle must supply the rest; the price can
+only trade within the redundancy that is left, and with four joints against a task that
+uses the arm's reach, there is none. Who moves is decided by the reach, and the weighting
+decides at most how fast. The scheme pays for the standoff in other ways: the stretched arm
+lifts the object with 6.3 cm of error against 4 cm from the station, and the tip's lift
+takes the elbow through its singular stretch, where the damping slows it.
+
+## 5.3 The grasp as a contact
+
+The jaws are two fingers on slide joints, driven closed by position actuators, on a body
+that follows the plant's tip frame through a stiff weld (a mocap body would do, except that
+it has no velocity, and contacts with fingers that teleport never slide). The object is a
+vertical post to grip, 2.4 cm across, on a body with the mission's mass and volume, its
+buoyancy applied as a force, its drag and added mass from MuJoCo's own ellipsoid fluid
+model, held to the structure by a weld that is released when both fingers touch it. Every
+plant step the jaws are moved to the plant's tip, MuJoCo steps ten times, and the force the
+object puts on the fingers comes back to the plant as the force at its jaws. The plant's
+equations have no payload term any more; what the vehicle carries is what the contact holds.
+
+<Figure src="/media/subsea-lab/wb_contact.png" width={100} alt="Three panels. Left, held or dropped against the tip's offset from the handle at closing for the 1 kilogram and 2 kilogram objects along three axes: held at 0, 1 and 2 centimetres sideways and dropped from 2.5; held to 3 centimetres ahead and dropped at 4; held at every vertical offset to 6 centimetres. Middle, the peak force on the tip: 13 newtons for the 1 kilogram object and 21 for the 2 kilogram one when centred, 74 and 104 newtons at 2 centimetres sideways, 50 to 56 at 2.5 where the grasp fails, flat along the post. Right, the mission's grasp as a contact under the LQR: the force on the tip jumps to 12 newtons at the closing, rings between 7 and 11 newtons from 34 to 40 seconds and settles at 8.7, just above the dashed weight of the object; the fingers' gap holds at 3.2 centimetres throughout">
+
+Closing the jaws with the tip displaced from the handle, for the mission's object and a
+2 kg one: held through a lift or dropped (left), the peak force on the tip (middle); and the
+mission's grasp as a contact under the LQR and the NMPC, the force the object puts on the
+tip and the fingers' gap (right)
+
+</Figure>
+
+**What it shows.** The fingers open 5 cm and the post is 2.4 cm across, so a lateral offset
+of 2 cm still closes on it and 2.5 cm does not; ahead of the handle the fingers' 6 cm of
+depth forgive 2 cm, and at 3 cm they knock the object off its hold before closing and it
+sinks away; along the post's 8 cm of height any offset up to 6 cm holds. Within the window
+the grasp is not free: closing 2 cm off centre drags the object into the fingers and the
+peak force on the tip rises from 16 N, the object's weight in water plus the closing
+impulse, to 84 N, and a 4 cm vertical offset to 100 N, a jolt the tip-force state of chapter
+3's filter would see as a fault. Chapter 4 put the tip at the handle to 1 cm with the camera
+and 4.4 cm without; the contact says 1 cm is a grasp and 4.4 cm, sideways, is not.
+
+**The mission on the contact.** With the grasp a contact, the LQR carries the object to the
+end: held at every sample, 8.7 N on the tip (the object as built, post included, is 8.7 N in
+water), a peak of 17.6 N at the closing, and a ringing of $\pm 1.5\ \text{N}$ between 34
+and 40 s while the arm's servo integral catches the weight through the compliant wrist, then
+a flat line. The cost of the real object against the payload change: 6.2 cm of tip error
+after the lift instead of 3.7, 5.1 s to recover instead of 4.4, $5.0^\circ$ of pitch instead of
+4.6, and 9.4 dead-band sign changes a second instead of 5.1, the thrusters answering the
+ringing. The NMPC holds the object too, with no failed solve, and pitches $27^\circ$ on the
+return instead of 22 with the payload change, never recovering to 2 cm: the contact does not
+change the verdict, it sharpens it. And one thing the contact taught that no payload change
+could: a rigid coupling between the jaws and the plant, with forces exchanged every ten
+milliseconds, rang and shook the object out of the fingers two seconds after the grasp,
+under any plan; a wrist with 50 ms of compliance holds it through the whole mission. The
+model of the grasp is also a model of the arm's compliance, and a stiff one drops things.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 5.1 | three controllers | before the grasp all four put the tip on the plan (0.1 to 1.5 cm); after it the two with integral action recover in 4.5 s with $4.6^\circ$ of pitch, the autopilot pitches $11^\circ$ and never recovers, the whole-body NMPC, with no object in its model, pitches $22^\circ$ on the return and never recovers; the NMPC is cheapest in thrust and uses the keep-out margin, and solves in 2.1 s against a 100 ms budget |
+| 5.2 | who moves | with the handle beyond the arm's reach the vehicle walks 0.29 m and the joints 2.24 rad at any price from 1 to 100: the reach decides who moves, the weighting at most how fast |
+| 5.3 | the contact | the grasp holds within 2 cm sideways, 2 cm ahead and 6 cm along the post; off-centre closing costs peaks of 80 to 100 N on the tip; the LQR carries the real object to the end (8.7 N on the tip, 6.2 cm after the lift against 3.7 with the payload change), the NMPC holds it and pitches $27^\circ$; a stiff wrist shook the object out, a 50 ms one holds it |
+
+What we learned:
+
+- With ten degrees of freedom and a plan, the controller that decides nothing (the LQR
+  with servos) is as good as the one that decides by priority, and both beat the one that
+  decides by optimization, because what the grasp needs is integral action and the
+  optimizer has none. Chapter 9's question has the same answer in three dimensions with a
+  real contact: integral action rides out what the certainty-equivalent NMPC cannot.
+- Who should move is a question the geometry answers before the controller does. A four-
+  joint arm against a task that uses its reach leaves no redundancy for a price to trade;
+  the set-based scheme's value here is not the choice but the guarantee: the joint limits
+  and the keep-out zone are never crossed, by construction.
+- The whole-body NMPC's solve time, 2.1 s against 100 ms, decides the language: the
+  optimizer stays a design and comparison tool in Python, and a real-time controller is a
+  generated-code problem the gallery must take up.
+- A grasp has a window, and chapter 4's tip floor sits inside it with the camera and outside
+  it without. Closing off centre within the window is not free: the object is dragged into
+  the fingers with ten times its weight on the tip. The first thing the contact teaches is
+  that the grasp is an impact.
+- A model of the grasp is also a model of the wrist. The contact held nothing until the
+  coupling between the jaws and the plant was given fifty milliseconds of compliance; with
+  it, the object rides through the mission on friction alone, and the mission flown on the
+  real object costs two centimetres and a second more than the one flown on a payload
+  change. The payload change of chapters 2 to 8 was a fair stand-in for the carry, and no
+  stand-in at all for the closing.
+
+**Back to the [project page](/projects/subsea-lab/).**

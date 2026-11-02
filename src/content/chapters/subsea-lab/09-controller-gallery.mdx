@@ -1,0 +1,171 @@
+---
+project: subsea-lab
+number: 9
+title: "How much model does safe underwater manipulation need"
+summary: "How much model safe underwater manipulation needs: eight controllers, from no model to a model re-identified online and three learned policies, on one mission and a grid of what none was told."
+---
+import Figure from '../../../components/Figure.astro';
+
+Eight chapters built models: the equations of chapter 1, the coefficients of chapter 2, the
+estimate of chapter 3, the camera's bound of chapter 4, the barriers of chapter 6, the
+residuals of chapter 7 and the three numbers of chapter 8, and chapter 5 flew the mission
+with three controllers that use them differently. arm-lab's chapters 10 and 11 found that a
+learned policy did not beat a classical controller behind a safety layer, on a robot that
+could always stop. This chapter asks whether that holds where the disturbance never stops:
+the controllers of chapter 5 and the model chapters 7 and 8 earned, against three policies
+trained on the same mission with no model at all, a bounded correction to one, and the same
+correction behind chapter 6's shield, all scored on the one mission and on a grid of what
+none of them was told.
+
+The code is in `src/subsea_lab/gallery.py`; the numbers
+come from `scripts/evaluate_gallery.py`.
+
+## 9.1 The gallery
+
+Eight controllers, in order of how much model they carry:
+
+- **the autopilot** of chapter 5: a PID per axis, no model, the arm's servos on the plan;
+- **the station LQR with servos**, chapter 5's controller: a linearisation of the identified
+  model at the station, integral action, the plan;
+- **the set-based task-priority scheme**: the arm's kinematics, the joint limits and the
+  keep-out zone as sets, over the LQR;
+- **the whole-body NMPC** on the identified model, the keep-out zone, the depth band and the
+  joint limits as constraints;
+- **the whole-body NMPC with chapter 8's three numbers online**: the same, with the object's
+  weight, mass and drag re-identified ten times a second from the raw sensors after the
+  grasp and set as the model's parameters at every solve;
+- **model-free RL**: a policy that commands the wrench and the joint rates from the state
+  (the position and attitude errors, the twist, the joints' errors and rates, the tip's error,
+  the phase), trained with PPO;
+- **LQR with residual RL**: a policy that adds a wrench within a quarter of the thrusters'
+  limits to the station LQR's, trained the same way;
+- **residual RL behind the shield**: the residual policy trained and flown behind chapter 6's
+  filter, which keeps the keep-out zone whatever the policy asks.
+
+The agents train on the mission with the current, the object's mass and its volume drawn
+at random each episode (0.1 to 0.4 m/s, 0.5 to 2 kg, a density from 2.5 to 5 times the
+water's), for 45 minutes of wall clock on four parallel copies of the plant, which is about
+210 000 to 230 000 steps and 340 to 370 missions each. The reward is the tip's distance from
+the plan, the attitude, the thrust, and a steep price for the keep-out zone. The budget is
+the plan's hour scaled to the laptop; the chapter does not pretend it is enough for the
+model-free agent, and reports it anyway.
+
+The grid: the **nominal** mission (0.2 m/s, 1 kg), a **0.4 m/s current**, a **2 kg object**,
+a **0.5 kg object**, a **buoyant** object (1 kg displacing 1.1 L, 1 N upward) and **2 kg in
+0.4 m/s**. A flight **succeeds** when the tip reaches the handle within 1 cm, the object is
+lifted within 10 cm of its target, the keep-out zone is never entered and nothing diverges.
+
+<Figure src="/media/subsea-lab/gal_training.png" width={100} alt="Episode return against simulated hours of mission for the three agents, as dots per episode and a ten-episode mean. The residual agent sits flat near minus 55 for six hours of mission; the shielded residual agent wanders between minus 80 and minus 200 around a mean near minus 120; the model-free agent's returns start near minus 1000, the price of a divergence, and fall to minus 5000 and below as its episodes grow longer without a mission being flown">
+
+The three agents' learning curves: the episode return against the simulated hours of
+mission, with the steps, the episodes and the minutes each used
+
+</Figure>
+
+**What it shows.** The two residual agents learn nothing a plot can see: the residual
+agent's ten-episode mean goes from $-54.7$ in its first ten missions to $-54.4$ in its last
+ten, the shielded one from $-124$ to $-122$, over 340 to 370 missions each. The reason is in
+the number itself: the return of the LQR alone, with a zero residual, is about $-54$, and
+most of it is the grasp's transient, which no wrench within a quarter of the thrusters'
+limits removes in the 0.3 s it lasts. The residual agents start where the LQR is and have
+nowhere visible to go in 45 minutes; the shielded one pays the shield's standoff and its
+occasional fallback in every episode. The model-free agent learned the one thing its 45 minutes could teach: not to
+diverge. Its first run, with a divergence priced at 50, learned to crash in a second and a
+half, because a crash cost less than a mission; with the price at 1000 its episodes grew
+from 18 s to 36 s on average over 1241 of them, and its return fell from $-1000$ to below
+$-5000$ as it lived longer and paid every second of being a metre from the plan. It never
+completed a mission in training.
+
+## 9.2 The grid
+
+<Figure src="/media/subsea-lab/gal_grid.png" width={100} alt="A grid of eight controllers by six scenarios. The autopilot fails the nominal, the 0.4 metre per second current, the 2 kilogram object and the heavy-and-fast case, with lifts of 10 to 25 centimetres and pitches of 11 to 19 degrees, and passes the 0.5 kilogram and buoyant objects. The LQR, the task-priority scheme, the residual agent and the shielded agent pass the same four scenarios each, with lifts of 1 to 4 centimetres and pitches of 1 to 10 degrees, and fail the 2 kilogram object and the heavy-and-fast case with lifts of 11 to 13 centimetres. The whole-body NMPC and the NMPC with the three numbers online pass the nominal and the buoyant object, with pitches of 22 and 28 degrees on the nominal, and diverge at 0.4 metres per second and with the 2 kilogram object; two of their scenarios were not run. The model-free agent fails every scenario, a metre from the handle with pitches of 20 to 38 degrees and the keep-out zone entered in the two 0.4 metre per second cases.">
+
+Every controller on every scenario: the tip's error after the lift as the colour, the
+pitch and the keep-out violations written in; hatched red where the mission failed
+
+</Figure>
+
+**What it shows.** Four controllers pass the same four scenarios and fail the same two,
+and three of them are the LQR in different clothes: the station LQR with servos, the
+task-priority scheme over it, the residual agent on top of it and the residual agent behind
+the shield all lift the object within 1 to 4 cm and pitch at most $10^\circ$ on the nominal, the
+0.4 m/s current, the light object and the buoyant one, and all miss the 10 cm lift threshold
+on the 2 kg object by a centimetre or two (10.7 to 12.7 cm), because the arm's servo
+integral needs five seconds to carry twice the weight it was tuned for, and the threshold
+is judged at the lift's end. The shield costs nothing on this grid, because nothing on it
+comes near the zone. The autopilot passes only the two light objects: its integral is too
+slow for the grasp and the current together. The two optimizers are the surprise. On the
+nominal mission they pass, with the three numbers online improving the lift from 7.4 to
+4.5 cm at the price of $28^\circ$ of pitch, the RLS's first-second overshoot of the weight
+driving the plan; on the buoyant object they are the best controllers on the grid (1.4 and
+1.5 cm, $3^\circ$). And on the two scenarios the identified model was not built for they
+diverge: in the 0.4 m/s current the vehicle reaches the keep-out boundary during the
+return, the elbow winds past its limit (the plant has no joint stops and the limit is a
+soft constraint) and the integration blows up at 50 s; with the 2 kg object the first solve
+after the grasp asks full heave and a shoulder beyond its limit and the plant is gone within
+0.3 s. The fallback never triggered, because every solve converged: the optimizer did
+exactly what it was asked with a model that was wrong, and it was asked without a limit it
+could not cross. The model-free agent fails all six: 0.9 to 1.0 m from the handle at the grasp, the
+object never lifted, $20^\circ$ to $38^\circ$ of pitch, and in the two 0.4 m/s cases the
+keep-out zone entered and, once, a divergence. With 230 000 steps of a $10\ \text{Hz}$ policy on a
+system that chapter 5 needed a model, a mixer and a servo to fly, this is the expected
+result, and the chapter reports it as the price of no model at this budget, not as a
+verdict on the method.
+
+## 9.3 The nominal mission, side by side
+
+<Figure src="/media/subsea-lab/gal_traces.png" width={100} alt="Two panels over the nominal mission. Top, the tip's error from the plan: every controller under 3 centimetres before the grasp, with the residual agent chattering between 1 and 2 centimetres during the reach; at the grasp every curve jumps to 15 to 23 centimetres; the LQR, the task-priority scheme and the two residual agents settle under 3 within five seconds; the whole-body NMPC swings to 14 centimetres at 47 seconds; the autopilot wanders to 11 centimetres twice during the return. Bottom, the pitch: within 2 degrees for all before the grasp; the NMPC with the three numbers online spikes to 28 degrees at the grasp and comes back over fifteen seconds; the whole-body NMPC sinks to minus 22 degrees during the return; the autopilot dips to minus 11; the others stay within 5 degrees. The model-free agent's error rises to 90 centimetres during the approach and stays there, with its pitch swinging through 30 degrees.">
+
+The nominal mission under every controller: the tip's error from the plan (top) and the
+pitch (bottom)
+
+</Figure>
+
+<Figure video="/media/subsea-lab/gal_mission.mp4" poster="/media/subsea-lab/gal_mission_poster.webp" width={100} alt="An animation of the nominal mission in side view under four controllers side by side: the vehicle as a box with the arm as a chain of links and the object as a red dot, the wall and the hatched keep-out zone at the right, the tip's target as a yellow cross; the vehicles approach from three metres, hold station, reach, lift the object and carry it back">
+
+The gallery: the nominal mission under four of the controllers, side view, the handle and
+the keep-out zone at the wall
+
+</Figure>
+
+**What it shows.** Before the grasp the gallery is a tie at the centimetre, with one
+exception that teaches: the residual agent chatters at 1 to 2 cm during the reach, a
+quarter-limit policy noise the LQR underneath never asked for, and its thrusters pay in
+dead-band crossings (12 a second against 5 for the LQR alone). After the grasp the four
+controllers with integral action are one curve; the optimizers, which have none, pitch, and
+the one with the adapted weight pitches most, because the weight it is given in the first
+second is three times the truth (chapter 8's transient) and it acts on it at once. The
+autopilot's two excursions on the return are the price of no model and a slow integral.
+The model-free agent is off the plot's scale from the approach on: it holds the
+vehicle a metre short of the station, upright within $30^\circ$, and waits.
+
+## Chapter summary
+
+| | topic | what it showed |
+|---|---|---|
+| 9.1 | the gallery | eight controllers from no model to a model re-identified online, three of them learned in 45 minutes each on random missions |
+| 9.2 | the grid | four controllers pass the same four scenarios and fail the same two, and three of them are the LQR with something on top; the autopilot passes two; the optimizers pass the nominal and the buoyant object (where they are the best) and diverge where the model is wrong; the shield costs nothing where nothing comes near the zone; model-free RL fails all six, a metre from the handle |
+| 9.3 | side by side | before the grasp a tie at the centimetre, the residual policy's noise the only mark; after it, integral action is one curve and the optimizers pitch, the adapted one most, on a weight three times too large for a second |
+
+What we learned:
+
+- How much model safe underwater manipulation needs: enough to linearise at the
+  station and integrate the error, and no more was rewarded on this grid. The LQR, the
+  priority scheme and the two residual agents are one controller on six scenarios; the
+  whole-body optimizers, with the most model of all, are the best where the model is right
+  and the only ones that diverge where it is wrong.
+- arm-lab's finding holds where the disturbance never stops, at this budget: a learned
+  policy did not beat the classical controller it sat on. The residual agents learned
+  nothing visible in 45 minutes of a shared laptop, which is the honest result of the
+  budget, not of the method; the shield behind which one of them trained cost it nothing
+  and bought it nothing, because the grid never approached the zone. The model-free agent learned
+  only not to crash, and the first time not even that: at a divergence priced below a
+  mission it learned to crash early.
+- The object is still the thing nobody measured. Every controller with integral action
+  failed the same scenario, 2 kg, by the same centimetre, for the same reason: a servo's
+  integral tuned for one weight needs five seconds for twice of it, and the mission does
+  not wait. Chapter 8's three numbers found that weight in two seconds and, given to the
+  optimizer, lifted better and pitched worse; given to the servo's feedforward instead,
+  which nobody built, they would have been the gallery's missing controller.
+
+**Back to the [project page](/projects/subsea-lab/).**
