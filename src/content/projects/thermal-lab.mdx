@@ -1,0 +1,68 @@
+---
+title: "Thermal Lab"
+summary: "Room-by-room heating as physics-informed model predictive control. How much energy a house saves when it knows where the heat is, where the people will be in the next hour and how heat moves between rooms, and how much of the saving comes from each."
+date: 2026-10-23
+tags: [modelling, identification, estimation, control, learning, energy]
+order: 4
+status: soon
+coverVideo: /media/thermal-lab/teaser.mp4
+coverPoster: /media/thermal-lab/teaser.webp
+coverAlt: "Air flowing through an open door between a warm room and a cool one: warm air, in red, flows out along the ceiling and cool air, in blue, along the floor"
+heroPoster: /media/thermal-lab/teaser.webp
+heroAlt: "Air flowing through an open door between a warm room and a cool one: warm air, in red, flows out along the ceiling and cool air, in blue, along the floor"
+cardSummary: "Room-by-room heating as physics-informed MPC: what a house saves when it knows where the heat is, where people will be and how heat moves between rooms."
+outline:
+  - title: "One room"
+    summary: "From one resistor and one capacitor to two of each: time constants, setbacks, insulation and mass."
+  - title: "Two rooms and a door"
+    summary: "Heat through the wall and air through the door, and why zoning saves less than you think."
+  - title: "A whole house"
+    summary: "A two-storey terraced house as a thermal network, and the baselines: one thermostat, zoning on a timetable."
+  - title: "Identification and the energy audit"
+    summary: "A grey-box model of the house from two weeks of ordinary data, and what that data can tell."
+  - title: "Where people will be"
+    summary: "Forecasting a household that does not keep to a timetable, up to four hours ahead."
+  - title: "Economic MPC"
+    summary: "The ladder from one thermostat to zoning, forecasts and MPC, at equal comfort."
+  - title: "The BOPTEST run"
+    summary: "The controllers on a standard benchmark house, scored by its own metrics."
+  - title: "The learned residual"
+    summary: "Learning the free heat from sun and people, and driving the radiator valves directly."
+  - title: "How much CFD does a controller need"
+    summary: "From one air node to a neural network trained on 714 CFD runs, each put in charge of a thermostat."
+  - title: "How many sensors"
+    summary: "A Kalman filter for the rooms that are not measured, and where to put the thermometers."
+  - title: "What a thermostat can tell a renovation"
+    summary: "Measuring a whole house's heat loss from its thermostat, checked on two real houses."
+  - title: "How hot the water needs to be"
+    summary: "Radiators, a condensing boiler and a heat pump: how low the supply temperature can go, and what that saves."
+---
+
+## Why heating
+
+Most houses heat every room from one thermostat in the living room, and radiators elsewhere
+are switched by hand when someone remembers. This project asks how much energy a house saves
+when it knows three things, and how much of the saving comes from each:
+
+1. **Where is the heat?** What a thermal network of the house looks like, which of its
+   parameters ordinary data can identify, and how many sensors it takes to know every room.
+2. **Where will the people be?** How well occupancy can be forecast an hour ahead, and what a
+   forecast is worth in kWh.
+3. **How does heat move?** Through walls, doors and stairs; how that coupling limits what
+   zoning can save, and what a predictive controller can do about it.
+
+## One house, one score
+
+Every chapter is scored the same way: energy used against comfort lost in the rooms where
+people are, against a one-thermostat baseline and zoning on a timetable. The model is a
+grey-box thermal network identified from data, with a small learned part for the free heat
+from sun and people; the controller is an economic MPC with a forecast of who will be where.
+The results are checked on [BOPTEST](https://github.com/ibpsa/project1-boptest), a standard
+benchmark for building control, as well as on this project's own simulated houses, and on
+measurements from real houses.
+
+## How it is made
+
+The same way as Pendulum Lab: one house, one fixed score, every claim with a figure.
+Everything is Python, from the thermal networks to the CFD runs of the air in a room, and
+every figure is regenerated from the same code.

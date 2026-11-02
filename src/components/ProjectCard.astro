@@ -6,9 +6,10 @@ interface Props {
   project: CollectionEntry<'projects'>;
 }
 const { project } = Astro.props;
-const { title, summary, tags, cover, coverAlt, coverVideo, coverPoster, date } = project.data;
+const { title, summary, tags, cover, coverAlt, coverVideo, coverPoster, date, status } = project.data;
+const soon = status === 'soon';
 ---
-<a class="card" href={`/projects/${project.id}/`}>
+<a class:list={['card', { 'card--soon': soon }]} href={`/projects/${project.id}/`}>
   {coverVideo ? (
     <div class="card__media">
       <video src={coverVideo} poster={coverPoster} loop muted playsinline preload={coverPoster ? 'none' : 'metadata'} data-autoplay aria-label={coverAlt ?? ''}></video>
@@ -17,10 +18,14 @@ const { title, summary, tags, cover, coverAlt, coverVideo, coverPoster, date } =
     <div class="card__media">
       <Image src={cover} alt={coverAlt ?? ''} width={800} height={450} loading="lazy" />
     </div>
+  ) : coverPoster ? (
+    <div class="card__media">
+      <img src={coverPoster} alt={coverAlt ?? ''} width="960" height="540" loading="lazy" decoding="async" />
+    </div>
   ) : null}
   <div class="card__head">
     <h3>{title}</h3>
-    <span class="mono faint card__year">{date.getFullYear()}</span>
+    {soon ? <span class="soon mono">Coming soon</span> : <span class="mono faint card__year">{date.getFullYear()}</span>}
   </div>
   <p class="muted">{summary}</p>
   {tags.length > 0 && <div class="tags">{tags.map((t) => <span class="tag">{t}</span>)}</div>}
