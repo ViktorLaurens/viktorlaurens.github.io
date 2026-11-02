@@ -1,126 +1,63 @@
 ---
 title: "Subsea Lab"
-summary: "Three questions only water asks. A ten-chapter study of an underwater vehicle-manipulator at a seabed structure: where is safe when standing still is not an option, what the camera buys, and what may be learned inside the physics, measured on one fixed mission with honest answers."
-date: 2026-10-01
+summary: "Three questions only water asks. A study of an underwater vehicle with a robot arm at a seabed structure: where is safe when standing still is not an option, what the camera buys, and what may be learned inside the physics, measured on one fixed mission."
+date: 2026-10-21
 tags: [modelling, identification, estimation, perception, safety, learning, control]
-featured: true
-order: 0
-coverVideo: /media/subsea-lab/gal_mission.mp4
-coverPoster: /media/subsea-lab/gal_mission_poster.webp
-coverAlt: "Four underwater vehicles with arms, side by side, each flying the same mission under a different controller: approaching a structure, reaching a handle, lifting an object and carrying it back"
-heroVideo: /media/subsea-lab/gal_mission.mp4
-heroPoster: /media/subsea-lab/gal_mission_poster.webp
-heroAlt: "Four underwater vehicles with arms, side by side, each flying the same mission under a different controller: approaching a structure, reaching a handle, lifting an object and carrying it back"
-cardSummary: "Three questions only water asks: safety when the safe state moves, what the camera buys, and what may be learned inside the physics, on one fixed underwater manipulation mission."
+order: 3
+status: soon
+coverPoster: /media/subsea-lab/teaser.webp
+coverAlt: "The vehicle camera's view of a seabed structure: four square fiducial markers around a yellow grab handle, seen through slightly turbid water"
+heroPoster: /media/subsea-lab/teaser.webp
+heroAlt: "The vehicle camera's view of a seabed structure: four square fiducial markers around a yellow grab handle, seen through slightly turbid water"
+cardSummary: "Three questions only water asks: safety when the safe state moves, what the camera buys, and what may be learned inside the physics, on one underwater manipulation mission."
+outline:
+  - title: "The vehicle and the arm in three dimensions"
+    summary: "A BlueROV2 Heavy with a four-joint arm, from first principles; why a sideways reach rolls and turns the vehicle."
+  - title: "Safe active identification"
+    summary: "Experiments designed to learn the most about the vehicle without ever leaving a safe box in the current."
+  - title: "Navigation on SE(3)"
+    summary: "Where the vehicle is, from acoustic fixes and a Doppler log, and how well the tip can know it."
+  - title: "What the camera sees"
+    summary: "A pose relative to the structure from fiducials, with an error bound that grows with turbidity."
+  - title: "Whole-body control, and who should move"
+    summary: "Autopilot, task priority and a whole-body NMPC on the same mission, and the grasp as a contact."
+  - title: "Safety when the safe state moves"
+    summary: "Barrier functions on a keep-out zone when the fallback is itself a controller fighting a current."
+  - title: "Learning inside the physics"
+    summary: "Learned models that keep the structure of hydrodynamics, and what that buys inside an optimizer."
+  - title: "Adapting after the grasp"
+    summary: "Finding the weight of an object nobody measured, in seconds, from the vehicle's own sensors."
+  - title: "How much model does safe underwater manipulation need"
+    summary: "The gallery: model-based controllers against reinforcement learning, on currents and objects none was told about."
+  - title: "Finding out that the model is wrong"
+    summary: "Monitors that catch a gust or a heavier object before the error can hurt."
 ---
-import Figure from '../../components/Figure.astro';
 
 ## Why under water
 
-The pendulum study ended on an underwater manipulator in the plane and five sentences that
-held there: the model is the first thing to fix and the last to trust; the estimate is the
-limit; learning helps where it has structure to stand on; a robust filter pays in reach; a
-free residual network inside an optimizer diverges. This project takes the same discipline
-into three dimensions and into water, where three things change that no pendulum and no
-fixed-base arm can ask. The current never stops, so the safe state is not standing still but
-a controller holding station with finite thrust. Position is not a fix but a pose relative to
-the structure, seen through water of varying turbidity, with an error that must be bounded
-before it can be trusted. And the object in the jaws is the thing nobody measured: after
-every model has been identified, what is left is its weight, its mass and its drag.
+[Pendulum Lab](/projects/pendulum-lab/) ended on an underwater manipulator in the plane. This
+project takes the same discipline into three dimensions and into water, where three things
+change that no pendulum and no fixed-base arm can ask:
 
-The system is a BlueROV2 Heavy with a four-joint arm, modelled from first principles,
-identified by a safe active campaign, and flown on one fixed mission that is never widened:
-in a $0.2\ \text{m/s}$ current with gusts, next to a structure with a keep-out zone, approach
-from three metres, hold station, reach a handle, grasp an object of unknown mass, buoyancy and
-drag, lift it clear and carry it back. Every figure, every number and every negative result
-comes from the same code, one script per chapter, with the runs cached so that a chapter can
-be regenerated.
+1. **Where is safe, when standing still is not an option?** The current never stops and
+   thrust is finite, so the safe state is not standing still but a controller holding
+   station. The safe set depends on the current and on how well the current is known.
+2. **What does the camera buy?** The structure is in view. A pose relative to it, with an
+   error bound that grows with turbidity, can replace a coarse acoustic fix for the one thing
+   that matters: not touching the structure while reaching it.
+3. **What may be learned inside the physics?** Hydrodynamics dissipate energy and added mass
+   is symmetric. A learned model that keeps that structure cannot create energy, and what
+   that buys inside an optimizer is measurable.
 
-## Selected results
+## One mission, never widened
 
-All results on this page and in the chapters come from simulation; the plant and the
-designer's model differ by construction, and the grasp is a contact in MuJoCo beside the
-plant.
+Every chapter flies the same mission. A BlueROV2 Heavy with a four-joint arm, in a current
+with gusts, next to a seabed structure with a keep-out zone, approaches, holds station,
+reaches a handle, grasps an object of unknown mass, buoyancy and drag, lifts it clear and
+carries it back, without entering the keep-out zone.
 
-<Figure src="/media/subsea-lab/bar_budget.png" width={100} alt="Two panels. Left, the clearance the shield keeps against the current toward the wall, from 0 to 0.4 metres per second, one line per ball of current the barrier is kept against: zero at every current when the ball is zero, rising from 1 to 5 centimetres for a 0.05 ball, 2 to 10 for 0.1, 7 to 20 for 0.2 and 14 to 31 for 0.3. Right, the same as a grid of the least clearance ever had">
+## How it is made
 
-Safety has a price in reach, and the price is the uncertainty of the water times its
-strength: with the current known the barrier costs nothing at any flow up to
-$0.4\ \text{m/s}$; unknown, each $0.1\ \text{m/s}$ of uncertainty costs two centimetres of
-standoff in still water and ten in a fast one ([chapter 6](/projects/subsea-lab/06-barriers/)).
-
-</Figure>
-
-<Figure src="/media/subsea-lab/cam_floor.png" width={100} alt="The tip's error at the handle under the USBL fix alone and with the camera, over turbidity: 4.4 centimetres with the USBL only and about one centimetre with the camera at every turbidity tried">
-
-A camera pose with a calibrated, turbidity-dependent error bound and a gate brings the tip
-from 4.4 cm of the handle to one ([chapter 4](/projects/subsea-lab/04-camera/)); the same
-bound used as the safety filter's margin recovers nine centimetres of reach and keeps exactly
-the safety the pose promised, which is not the safety the water demands
-([chapter 6](/projects/subsea-lab/06-barriers/)).
-
-</Figure>
-
-<Figure src="/media/subsea-lab/learn_energy.png" width={100} alt="Left, grouped bars of prediction error over residual for four models on six sets; right, a histogram of the power each learned model puts into the system at a thousand random states, the free network's spread across positive and negative values, the passive model's all negative, the GP's exactly zero">
-
-After identification, what is left to learn is the object, and three numbers by least
-squares explain it better off the training flight than a network does; what the physics
-structure earns is not accuracy but a certificate, a model that cannot put energy into the
-system at a thousand states it was never trained on
-([chapter 7](/projects/subsea-lab/07-learning-inside-the-physics/)).
-
-</Figure>
-
-<Figure src="/media/subsea-lab/adapt_curves.png" width={100} alt="Four panels of prediction error over time since the grasp for four adapters, on an object inside the training distribution and three outside it; the three numbers fall under 20 percent within seconds on every object, the context latent stays near or above 100 percent outside the distribution">
-
-Three numbers re-identified from the raw sensors ten times a second find a new object in
-two to four seconds, a buoyant one or one twice the heaviest trained; a latent trained over
-24 objects answers nonsense a few newtons past its edge
-([chapter 8](/projects/subsea-lab/08-adapting-after-the-grasp/)).
-
-</Figure>
-
-<Figure src="/media/subsea-lab/gal_grid.png" width={100} alt="A grid of eight controllers by six scenarios coloured by the tip's error after the lift, hatched where the mission failed: four controllers pass the same four scenarios, the optimizers pass two and diverge where the model is wrong, model-free reinforcement learning fails all six">
-
-Eight controllers on one mission and a grid of what none was told: the station LQR, a
-task-priority scheme and two residual policies are one controller on six scenarios, the
-optimizers are the best where the model is right and diverge where it is wrong, and
-model-free reinforcement learning never flew the mission
-([chapter 9](/projects/subsea-lab/09-controller-gallery/)).
-
-</Figure>
-
-## The storyline: three questions only water asks
-
-**Where is safe when standing still is not an option?** Chapter 1 builds the vehicle and
-the arm in three dimensions and a compiled twin of the equations; chapter 5 makes the mission
-fly and asks who should move, the vehicle or the arm; chapter 6 builds the barriers in the
-structure's frame under a current that never stops, with station keeping as the fallback,
-and measures the reach budget; chapter 10 adds the monitors that find out the model is wrong,
-with a detection time measured against a time to harm.
-
-**What does the camera buy?** Chapter 2 identifies the vehicle safely, inside a box, in a
-current; chapter 3 estimates its state, its heading without a compass, the current and the
-force at the jaws, and finds the floor the estimate sets on the tip; chapter 4 replaces the
-acoustic fix with a pose relative to the structure, bounded by what the camera can see
-through the water.
-
-**What may be learned inside the physics?** Chapter 7 learns the residual after
-identification with and without structure and tests the certificate where an optimizer
-would; chapter 8 adapts to an unknown object from the raw sensors, physics against structure
-against context; chapter 9 sets every controller, learned and not, against each other on the
-one mission.
-
-The closing summary, in chapter 10, is the account of what scaled from the pendulum and the
-arm and what the water changed.
-
-## How it was made
-
-The report lives in a private repository with the code a committee could read: the physics
-in one package, one evaluation script per chapter with its runs cached, figures that only
-read those runs, a test suite that includes the chapters' own rules (every figure must exist
-with a full-sentence description, every formula must render), and a decisions file that says
-why things are the way they are. The site's pages are converted from the report's Markdown
-by a script, so that what is read here is what was reviewed there. Two preprints are drawn
-from it: safety when the safe state moves (chapters 6 and 10), and what may be learned
-inside the physics (chapters 7 and 8).
+The same way as Pendulum Lab: one system, one fixed task, every claim with a figure.
+Everything is Python, with MuJoCo for the contact and the camera; every number comes from the
+same code, and the results come from simulation.

@@ -1,9 +1,10 @@
 ---
-import { getCollection, getEntry, render } from 'astro:content';
+import { getEntry, render } from 'astro:content';
 import Base from '../../../layouts/Base.astro';
+import { publishedChapters } from '../../../lib/chapters';
 
 export async function getStaticPaths() {
-  const chapters = await getCollection('chapters');
+  const chapters = await publishedChapters();
   return chapters.map((c) => {
     const [project, chapter] = c.id.split('/');
     return { params: { project, chapter }, props: { entry: c } };
@@ -15,7 +16,7 @@ const { project: projectId } = Astro.params;
 const project = await getEntry('projects', projectId!);
 if (!project) throw new Error(`Unknown project ${projectId}`);
 
-const siblings = (await getCollection('chapters', (c) => c.data.project === projectId))
+const siblings = (await publishedChapters(projectId))
   .sort((a, b) => a.data.number - b.data.number);
 const index = siblings.findIndex((c) => c.id === entry.id);
 const prev = siblings[index - 1];
