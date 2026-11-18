@@ -5,16 +5,17 @@
 // The same figure-block contract as pendulum-lab: figures become <Figure>, GIFs become
 // looping MP4s, links into the (private) repository are flattened to plain text, chapter
 // links are rewritten. Media must be copied separately:
-//   cp docs/media/*.png docs/media/*.mp4 public/media/subsea-lab/
+//   cp docs/media/*.png docs/media/*.mp4 public/media/underwater-manipulation/
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = process.argv[2] ?? 'C:/Users/vikto/dev/personal/subsea-lab/docs';
-const OUT = join(HERE, '..', 'src', 'content', 'chapters', 'subsea-lab');
-const BASE = '/projects/subsea-lab';
-const MEDIA = '/media/subsea-lab';
+// By default the report repository is expected next to this one.
+const SRC = process.argv[2] ?? join(HERE, '..', '..', 'subsea-lab', 'docs');
+const OUT = join(HERE, '..', 'src', 'content', 'chapters', 'underwater-manipulation');
+const BASE = '/projects/underwater-manipulation';
+const MEDIA = '/media/underwater-manipulation';
 
 const chapters = [
   { file: '01_the_system.md', slug: '01-the-system', summary: 'The vehicle and the arm in three dimensions: Fossen per body, Kane over the chain, a compiled CasADi twin; why yaw has no spring, why the textbook model is twice too fast, and which coefficients the tip is sensitive to.' },
@@ -82,7 +83,7 @@ for (const ch of chapters) {
   if (/\]\((README|\d\d_)/.test(md)) warnings.push(`${ch.file}: leftover report link`);
 
   const imports = "import Figure from '../../../components/Figure.astro';";
-  const fm = `---\nproject: subsea-lab\nnumber: ${number}\ntitle: "${title.replace(/"/g, '\\"')}"\nsummary: "${ch.summary.replace(/"/g, '\\"')}"\n---\n${imports}\n\n`;
+  const fm = `---\nproject: underwater-manipulation\nnumber: ${number}\ntitle: "${title.replace(/"/g, '\\"')}"\nsummary: "${ch.summary.replace(/"/g, '\\"')}"\n---\n${imports}\n\n`;
   writeFileSync(join(OUT, `${ch.slug}.mdx`), fm + md.trimEnd() + '\n');
   console.log(`${String(number).padStart(2, '0')} ${ch.slug}: ${md.length} chars, ${(md.match(/<Figure/g) || []).length} figures`);
 }

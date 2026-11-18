@@ -1,0 +1,629 @@
+---
+project: three-pixels-in-the-sky
+number: 2
+title: "Seeing a small drone"
+summary: "Two cameras on a Jetson and a real sky: a detector for targets of a few pixels with its mathematics, false alarms on an empty sky, detection against size and range, what the video encoder costs, and a classifier that did not transfer."
+---
+import Figure from '../../../components/Figure.astro';
+
+A drone a few hundred metres away covers only a handful of pixels. This chapter tests how
+few pixels are enough for two small cameras on a real sky: what the detector reports
+when the sky is empty, how small a target it still finds, and from what distance it picks
+up a drone that flies towards the camera.
+
+The sky recordings and the false alarms are real. The drones are not. No drone could be
+flown in front of the cameras that week, so they are drawn into the recordings with a
+model. Section 2.12 lists what this leaves open.
+
+## 2.1 The cameras and the recordings
+
+The setup is two Arducam IMX519 cameras on a Jetson Orin Nano Developer Kit with JetPack
+6.2 and Arducam's driver for that release. The driver offers four sensor modes:
+
+| Mode | Frame rate |
+|---|---|
+| 4656 x 3496 | 9 frames per second |
+| 3840 x 2160 | 17 frames per second |
+| 1920 x 1080 | 60 frames per second |
+| 1280 x 720 | 120 frames per second |
+
+<Figure src="/media/three-pixels-in-the-sky/jetson_cameras.jpg" width={100} alt="A black metal case with a fan grille, holding a Jetson Orin Nano. Two small green camera boards are mounted on brackets on one side of the case, a few centimetres apart, each connected by a flat ribbon cable.">
+
+The Jetson Orin Nano in its case with the two IMX519 cameras. The cameras sit a hand's width apart, which is enough to record with both but too little to measure range from the pair.
+
+</Figure>
+
+Exposure and gain have to be fixed during a recording. With automatic exposure the
+brightness of the whole frame changes, and a motion detector then sees motion everywhere.
+A small web application on the Jetson shows both cameras live in a browser, sets focus
+and exposure, and records. The Orin Nano has no hardware video encoder, so the recordings
+are encoded in software (x264, fastest preset) at 10 Mbit/s for 1920 x 1080 and 30 Mbit/s
+for the two larger modes.
+
+On 16 November 2026, between 14:31 and 14:51, both cameras recorded a cloudless sky,
+with trees along the lower and left edges of the frame. Exposure was fixed at
+1500 microseconds and gain at 1.
+
+| Recording | Mode | Length |
+|---|---|---|
+| A | 1920 x 1080, 30 frames per second | 322 s |
+| B | 1920 x 1080, 30 frames per second | 293 s |
+| C, D, E | 3840 x 2160, 17 frames per second | about 90 s, 60 s and 90 s |
+| F | 4656 x 3496, 9 frames per second | about 90 s |
+
+Only camera 0 is used below. The lens of camera 1 did not respond to focus commands, and
+its image is out of focus.
+
+## 2.2 Pixels on target
+
+A target of width $s$ at range $d$ covers
+
+$$n = \tfrac{f_x s}{d}, \qquad f_x = \tfrac{w}{2 \tan(\tfrac{1}{2} \mathrm{HFOV})}$$
+
+pixels, where $w$ is the image width in pixels. The horizontal field of view is 67 degrees
+according to the lens data. It has not been calibrated, and every range in this chapter
+scales with it. It gives $f_x = 1450$ pixels at 1920 x 1080.
+
+The 3840 x 2160 mode covers the same field of view as the 1920 x 1080 mode: a frame of
+recording C shrunk to half size matches a frame of recording B to within two pixels. A
+target is therefore twice as wide in pixels in the larger mode.
+
+| Target | 2 px | 4 px | 8 px |
+|---|---|---|---|
+| 0.30 m drone, 1920 x 1080 | 218 m | 109 m | 54 m |
+| 0.30 m drone, 3840 x 2160 | 435 m | 218 m | 109 m |
+
+## 2.3 The detector
+
+The detector does not decide what an object is. It reports every small thing that is new
+or moving against the sky and passes these candidates on to a later stage. For every frame
+it does six things:
+
+1. It aligns the frame with a slowly updated reference, to remove small shaking of the
+   mount.
+2. It band-pass filters the image, so that only structures of a few pixels remain. Clouds
+   and brightness gradients disappear.
+3. It subtracts two running averages of that filtered image, a fast one (about one second)
+   and a slower one (about three seconds).
+4. It divides the difference at each pixel by the noise level around that pixel, leaving
+   out a small patch around the pixel itself. Busy regions then raise their own threshold.
+5. It thresholds at five standard deviations, groups pixels into blobs, and keeps blobs of
+   a plausible size that are not long thin streaks.
+6. It confirms a candidate that shows up again nearby in three of the last five frames.
+
+The six steps in formulas, with the values used.
+
+**Alignment.** A shift between two images appears as a phase ramp between their Fourier
+transforms $F_1$ and $F_2$. Dividing out the magnitudes leaves only that ramp, and its
+inverse transform is a single peak at the shift [[55]](/projects/three-pixels-in-the-sky/references/):
+
+$$
+(\Delta x, \Delta y) = \arg\max \mathcal{F}^{-1} \left[ \frac{F_1 \overline{F_2}}{| F_1 \overline{F_2} |} \right]
+$$
+
+It is computed on an image reduced four times. A shift of more than 12 pixels means the
+camera was moved, and the detector starts again.
+
+**Band-pass.** The frame $I$ is smoothed with two Gaussians and the results are
+subtracted:
+
+$$
+b = G_{1} * I - G_{5} * I
+$$
+
+The indices are the widths in pixels. A difference of Gaussians approximates the
+Laplacian of a Gaussian [[56]](/projects/three-pixels-in-the-sky/references/). It responds most strongly to a spot of one to three
+pixels and gives zero on anything that is smooth over more than about ten pixels, which
+is why clouds and the brightness gradient of the sky disappear.
+
+**Background.** Each pixel keeps a running average of the band-passed image:
+
+$$
+B_t = (1 - \alpha) B_{t-1} + \alpha b_t
+$$
+
+This is a first-order low-pass filter with a memory of $\frac{1}{\alpha}$ frames. With
+$\alpha = 0.03$ that is 33 frames, or 1.1 seconds. The second average uses
+$\alpha = 0.009$, which is 3.7 seconds, and catches targets that move too slowly to
+differ from the fast one. The change is $d_t = b_t - B_{t-1}$.
+
+**Score.** The change is divided by the noise level around the pixel:
+
+$$
+z(x) = \frac{| d(x) |}{\max ( \sigma_{loc}(x), \sigma_{glob}, \sigma_{min} )}, \qquad
+\sigma_{loc}^2(x) = \frac{1}{576} \Big( \sum_{25 \times 25} d^2 - \sum_{7 \times 7} d^2 \Big)
+$$
+
+The local level is the mean square of $d$ in a window of 25 by 25 pixels without the 7 by
+7 pixels in its centre, so that a target does not raise its own threshold. The global
+level is 1.48 times the median of $| d |$ over the frame, an estimate of the standard
+deviation that outliers do not disturb. This is the constant-false-alarm-rate test known
+from radar [[18]](/projects/three-pixels-in-the-sky/references/): the threshold follows the noise, so the rate of false alarms stays
+the same in quiet and in busy parts of the sky.
+
+**Threshold.** A blob needs one pixel with $z$ above 5 and grows into neighbours above 3.
+If the noise were Gaussian and independent, a pixel would pass 5 with a probability of
+
+$$
+P(z \geq 5) = 2 Q(5) = 5.7 \cdot 10^{-7}
+$$
+
+where $Q$ is the tail of the normal distribution. With 1.35 million sky pixels in a
+frame that is 0.8 false pixels per frame. A target with a change of $A$ times the noise
+is found with probability $Q(5 - A)$: half of the time at $A = 5$ and nine times out of
+ten at $A = 6.3$.
+
+**Persistence.** A candidate is confirmed when it is seen again within 23 pixels in 3 of
+the last 5 frames. If a false candidate appears in that circle with probability $p$ per
+frame, independently, the probability of at least three in five is
+
+$$
+P = \sum_{k=3}^{5} \binom{5}{k} p^k (1 - p)^{5-k} \approx 10 p^3
+$$
+
+With one false pixel per frame, $p$ is 0.0012 and $P$ is about $2 \cdot 10^{-8}$. Independent
+noise can therefore practically never produce a confirmed candidate. The confirmed
+candidates that do appear on the empty sky (section 2.4) must come from things that
+last for several frames: real objects, and noise that is correlated in time. This
+correlation returns in sections 2.11 and 5.6.
+
+The background under a confirmed candidate is frozen for 45 frames, so that a slow target
+does not become part of the background.
+
+<Figure video="/media/three-pixels-in-the-sky/pipeline.mp4" poster="/media/three-pixels-in-the-sky/pipeline.webp" width={100} alt="One frame of a video. Left: the camera frame with the trees darkened and two small green boxes on drones in the sky. Bottom: five magnified views of the same 48-pixel patch around one drone: the camera frame with a faint grey smudge, the band-passed image with one blue dot, the change against the background with the same dot, the score against local noise with one bright spot outlined, and the camera frame again with a green box and the track behind it. Right: the range (141 m), the width in the image (3.1 pixels) and a plot of the score at the drone rising above the threshold.">
+
+What each step of the detector produces, for a drone 3 pixels wide at 141 m. The video follows it from 250 m to 50 m. The drone cannot be seen in the frame or in the difference from the background. It only stands out once the difference is divided by the local noise.
+
+</Figure>
+
+The trees have to be excluded, otherwise every moving leaf is a candidate. The mask
+is built from the recording itself: sky is where the image has almost no fine texture in
+three quarters of the sampled frames, and that area is shrunk by 30 pixels to stay away
+from anything textured. A bird or an aircraft that passes once does not end up in the mask.
+
+<Figure src="/media/three-pixels-in-the-sky/sky_mask.png" width={85} alt="A frame of recording A with the masked area tinted red. The trees along the left and lower edges are masked with a margin around them; about two thirds of the frame remain as open sky.">
+
+The sky mask for recording A, built from the recording itself. The red area is ignored; 65 % of the frame remains. Trees and buildings are left out, so every false alarm counted later comes from the sky.
+
+</Figure>
+
+Without the mask the detector reports its maximum of 60 candidates in every frame, all of
+them in the trees.
+
+## 2.4 What the empty sky gives
+
+The detector was first run on the two 1080p recordings as they are, with nothing added.
+
+| | Recording A | Recording B |
+|---|---|---|
+| Length | 5.4 min | 4.9 min |
+| Confirmed candidates per frame | 0.13 | 0.35 |
+| Tracks lasting at least 1 s | 6 | 5 |
+| Tracks lasting at least 2 s | 0 | 4 |
+
+The tracks that last are real objects. In recording B the detector follows one bright
+point for 66 seconds while it crosses 840 pixels, which is what a high aircraft does. Four
+darker shapes cross several hundred pixels in two to six seconds, like birds. They were
+identified by eye from small crops, so this is not verified. In recording A three of the six
+tracks are fast crossings of the same kind. The other three sit at the edge of the left
+tree, where branches swing past the mask in gusts of wind.
+
+<Figure src="/media/three-pixels-in-the-sky/real_tracks.png" width={100} alt="Twelve magnified crops from recording B, one per track, ordered by how long the track lasted. The first shows a small bright dot on blue sky; the second and several others show small dark shapes.">
+
+Crops at the middle of the twelve longest tracks in recording B, magnified four times. The first is the 66-second track. What survives for seconds on an empty sky is real, an aircraft and birds, and not noise.
+
+</Figure>
+
+<Figure video="/media/three-pixels-in-the-sky/real_tracks_video.mp4" poster="/media/three-pixels-in-the-sky/real_tracks_video.webp" width={100} alt="One frame of a video of the unmodified recording. Two green paths curve across the sky from the right edge towards the middle, each ending in a small green box. Below, a magnified view shows a dark shape about 7 pixels tall, and its score map shows one bright spot. Text on the right: by eye two birds, followed for 2.8 seconds, classifier says flying object 97 percent.">
+
+The detector on the unmodified recording B: an aircraft and three birds, with their tracks and the classifier's vote. The detector follows real objects of a few pixels, and the classifier cannot name them yet.
+
+</Figure>
+
+In ten minutes of real, cloudless sky the detector did not produce a single noise track of
+two seconds or more. This is one afternoon and one kind of sky. A cloudy sky will be harder.
+
+## 2.5 How detection is tested
+
+Measuring detection takes targets whose position is known in every frame, in situations
+that are hard to set up: a few pixels wide, hovering, or flying in from far away. The
+targets are therefore drawn into the real recordings. The model does the following, in
+this order:
+
+- **Shape.** A quadcopter seen from below at an angle (body, arms, motors, and rotor discs
+  that are partly transparent), a fixed-wing aircraft, or a bird with flapping wings.
+- **Sampling.** The shape is drawn sixteen times finer than the image and averaged down at
+  its exact sub-pixel position. A three-pixel target therefore covers some pixels only
+  partly.
+- **Optics.** A Gaussian blur of 0.8 pixels for the lens and focus.
+- **Motion blur.** A streak along the direction of motion, as long as the distance the
+  target moves during 30 % of the frame interval.
+- **Contrast.** The target is blended with the sky behind it. Contrast 1 is a dark
+  silhouette, 0.2 is a faint one as you would see through haze. A sunlit target is the
+  same with a light grey.
+- **Noise.** The pasted pixels get the same noise level as the background.
+- **Compression.** The target is drawn into the brightness plane of the recording, in the
+  camera's own pixel format. Then the frames are encoded again with the recorder's
+  settings, and the detector gets the decoded result.
+
+The compression step is essential, because compression removes exactly the faint small
+detail the detector is looking for. A target that skips this step is too easy to detect: a two-pixel target at contrast 0.4 is found in 92 % of frames without the
+encoder and in 52 % with it. All numbers below include the encoder unless stated otherwise.
+
+<Figure src="/media/three-pixels-in-the-sky/pasted_targets.png" width={70} alt="A grid of magnified crops of blue sky with pasted targets. Rows: dark quadcopter, sunlit quadcopter, fixed-wing aircraft, bird. Columns: widths of 3, 4, 6, 8, 12 and 20 pixels. The smallest are faint smudges; at 12 pixels the shapes are recognisable.">
+
+Pasted targets on my own sky at contrast 0.6, magnified five times, before compression. Rows: dark quadcopter, sunlit quadcopter, fixed wing, bird. Below about 6 pixels every target is the same soft spot. Shape is not available at the ranges that matter.
+
+</Figure>
+
+## 2.6 Detection against size
+
+In this test eighteen targets fly at the same time, each in its own cell of open sky: six
+widths times three contrasts. They cross the sky at one pixel per frame, over two
+20-second stretches of recordings A and B. A frame counts as detected if the centre of a
+candidate lies on the target's box.
+
+<Figure src="/media/three-pixels-in-the-sky/pd_size_contrast.png" width={100} alt="Fraction of frames detected against target width from 2 to 12 pixels, for a dark quadcopter at three contrasts. The candidate detector reaches 1 at 2 pixels for contrast 0.8, at 4 pixels for contrast 0.4 and at 6 pixels for contrast 0.2. The blob detector stays at 0 except at contrast 0.8, where it rises from 0 at 6 pixels to 1 at 12 pixels.">
+
+Share of frames in which a dark quadcopter that crosses the sky is detected, against its width in pixels. Solid: the detector of this chapter. Dashed: the blob detector. This detector works from 3 to 4 pixels where the blob detector needs 8 to 12, and contrast matters as much as size.
+
+</Figure>
+
+| Width | Contrast 0.2 | 0.4 | 0.8 | Blob, 0.8 |
+|---|---|---|---|---|
+| 2 px | 0.00 | 0.52 | 1.00 | 0.00 |
+| 3 px | 0.08 | 0.95 | 1.00 | 0.00 |
+| 4 px | 0.80 | 1.00 | 1.00 | 0.00 |
+| 6 px | 1.00 | 1.00 | 1.00 | 0.00 |
+| 8 px | 1.00 | 1.00 | 1.00 | 0.76 |
+| 12 px | 1.00 | 1.00 | 1.00 | 1.00 |
+
+The blob detector is the baseline: plain background subtraction with a fixed grey-level
+threshold and a 3 x 3 opening. It needs about 8 pixels at high contrast and finds nothing at the two lower
+contrasts, because a faint target changes the image by less than its threshold of 25 grey
+levels. Scoring each pixel against the local noise is what makes the small sizes possible.
+
+<Figure src="/media/three-pixels-in-the-sky/pd_by_kind.png" width={70} alt="Fraction of frames detected against target width at contrast 0.4 for five cases. A sunlit quadcopter is found in every frame from 3 pixels, a dark quadcopter in 95 % of frames at 3 pixels, a fixed wing from 4, a flapping bird from 6. The hovering quadcopter rises slowly from 0.03 at 2 pixels to 0.88 at 12 pixels.">
+
+Detection against size for different targets at contrast 0.4, with the detector of this chapter. Anything that moves steadily is found from 3 to 4 pixels. The hovering drone and the flapping bird are the weak cases.
+
+</Figure>
+
+Two results stand out. A flapping bird needs more pixels than a drone with the same span,
+because its wings are thin and folded half of the time. At 4 pixels the bird is found in
+49 % of frames and the quadcopter in all of them. The second result is a weakness. A
+hovering quadcopter is found much less often than a crossing one: 32 % of frames at
+4 pixels against 100 %. The detector looks for change, and a hovering target stops
+changing. After five seconds of hover a 4-pixel target at contrast 0.4 is only found in
+9 % of frames. Section 2.11 returns to this.
+
+## 2.7 A drone flying in
+
+In a real approach the size and the motion of the target change together, so the next
+test defines the flight in metres. A drone of 0.30 m starts about 350 m away and flies
+towards and past the camera at 6 to 14 m/s, weaving 1 to 4 m sideways. Each position
+is projected through the camera model of section 2.2, with the camera pitched up 30 degrees.
+The target grows from just over one pixel to about ten, and its speed in the image goes
+from a fraction of a pixel per frame to almost nine. Three drones fly in each clip, one
+per contrast, over six clips of recordings A and B. That gives 18 flights.
+
+The detection range is the first moment at which the drone is confirmed in at least 20 of
+the next 30 frames.
+
+<Figure src="/media/three-pixels-in-the-sky/pd_range.png" width={100} alt="Fraction of frames detected against range from 350 m down to 50 m at 1920 x 1080, with target width in pixels on a second axis. The candidate detector passes one half at about 280 m for contrast 0.8, 190 m for contrast 0.4 and 130 m for contrast 0.2. The blob detector responds only inside 70 m, and only at contrast 0.8.">
+
+A 0.30 m drone flying in: share of frames detected against range at 1920 x 1080, over 18 flights. Solid: the detector of this chapter. Dashed: the blob detector. The drone is held from 127 to 274 m depending on its contrast, when it is only 1.6 to 3.4 pixels wide.
+
+</Figure>
+
+<Figure video="/media/three-pixels-in-the-sky/approach.mp4" poster="/media/three-pixels-in-the-sky/approach.webp" controls width={100} alt="The sky recording with three small drones drawn in, each marked by a circle, and a green box where the detector has confirmed one">
+
+One of these clips as a video: three drones, one per contrast, drawn into the recording and flying in. Circles mark where each drone really is and green boxes where the detector has confirmed it.
+
+</Figure>
+
+| Contrast | First sustained detection | Median | Width there |
+|---|---|---|---|
+| 0.8 | 261 to 349 m | 274 m | 1.6 px |
+| 0.4 | 172 to 201 m | 186 m | 2.3 px |
+| 0.2 | 111 to 138 m | 127 m | 3.4 px |
+
+The detector picked up all 18 flights. A real drone will not keep 80 % contrast against
+the sky at 274 m, so the rest of the report uses the two lower rows.
+
+## 2.8 The same flight at 4K
+
+The 3840 x 2160 mode has the same field of view with twice as many pixels across, so the
+same drone at the same range is twice as wide in pixels. If the number of pixels were the
+only thing that counts, the ranges of section 2.7 would double. The flights were repeated on
+the 4K recording (17 frames per second, 30 Mbit/s) with the same detector settings. The
+lens blur is 1.2 pixels instead of 0.8, because a lens does not become sharper when the
+sensor is read out at a higher resolution. Four clips of the one 90-second recording
+with three drones each give 12 flights.
+
+<Figure src="/media/three-pixels-in-the-sky/pd_range_4k.png" width={70} alt="Fraction of frames detected against range from 350 m down to 50 m at 3840 x 2160. The candidate detector stays near 1.0 over the whole range for contrast 0.8, passes one half at about 285 m for contrast 0.4 and at about 195 m for contrast 0.2. The blob detector responds only at short range, and only at contrast 0.8.">
+
+The same flights at 3840 x 2160, 12 flights. Solid: the detector of this chapter. Dashed: the blob detector. Four times as many pixels give about one and a half times the range, and not twice.
+
+</Figure>
+
+| Contrast | First sustained detection, 4K | Median, 4K | Median, 1080p | Width there, 4K |
+|---|---|---|---|---|
+| 0.8 | 356 to 367 m | 360 m | 274 m | 2.4 px |
+| 0.4 | 254 to 322 m | 295 m | 186 m | 3.0 px |
+| 0.2 | 178 to 215 m | 180 m | 127 m | 4.8 px |
+
+The range increases by a factor of 1.6 at contrast 0.4 and 1.4 at contrast 0.2, so less
+than the factor of 2 that the pixel count suggests. At 4K the detector needs a wider
+target (3.0 pixels against 2.3 at contrast 0.4). The blur spreads the same drone over more
+pixels, and each of those pixels collects less light and has more noise.
+
+The top row says little, because the flights start near 350 m and the drone is detected
+almost from the first frame. The four clips also overlap in time and come from one
+recording, so they are less independent than the 18 flights at 1080p.
+
+The cost is computing time: four times as many pixels per frame, for a detector that
+already runs slower than real time at 1080p. The sensible design is to search at
+low resolution and to read out a 4K window only around a candidate.
+
+## 2.9 What the video encoder costs
+
+The recordings are compressed to 10 Mbit/s before the detector sees them, and compression
+removes faint small detail first. To find out how much detection is lost this way,
+the size test and the approach were repeated with the target encoded at other bitrates,
+up to lossless, where the encoder keeps every pixel value.
+
+<Figure src="/media/three-pixels-in-the-sky/bitrate.png" width={85} alt="Two panels against bitrate: 5, 10, 20, 40 Mbit/s and lossless. Left: fraction of frames in which small crossing targets are detected; a 2-pixel target at contrast 0.4 rises from 0.26 at 5 Mbit/s through 0.52 at 10 to 0.92 lossless, a 3-pixel target at contrast 0.2 from 0.02 to 0.37. Right: range at which an approaching drone is first held; from 10 Mbit/s to lossless it rises from 186 to 234 m at contrast 0.4 and from 127 to 153 m at contrast 0.2.">
+
+Detection against the bitrate of the video encoder. Left: small crossing targets, two clips. Right: first sustained detection of the approaching drone, four flights per contrast. Below 20 Mbit/s the encoder removes the smallest targets. Without it the range is a quarter longer.
+
+</Figure>
+
+| | 5 Mbit/s | 10 Mbit/s | 20 Mbit/s | 40 Mbit/s | Lossless |
+|---|---|---|---|---|---|
+| 2 px target, contrast 0.4, frames detected | 26 % | 52 % | 77 % | 83 % | 92 % |
+| 4 px target, contrast 0.2, frames detected | 45 % | 80 % | 96 % | 98 % | 99 % |
+| Candidates per frame that are not a target | 2.2 | 4.2 | 0.9 | 0.7 | 0.7 |
+| Drone first held, contrast 0.4 | | 186 m | 194 m | 215 m | 234 m |
+| Drone first held, contrast 0.2 | | 127 m | 140 m | 149 m | 153 m |
+
+Over all six flights per contrast, the lossless ranges are 234 m and 153 m, against 186 m
+and 127 m at 10 Mbit/s. That is a quarter more range at contrast 0.4 and a fifth more at
+0.2, only from leaving the encoder out. Doubling the bitrate to 20 Mbit/s already brings
+the number of stray candidates down to the level of the empty sky.
+
+Two things limit this test. The sky under the target has already been through the
+recorder's encoder once, so "lossless" here means "no second encoding" and not a raw sensor
+frame. And the stray candidates at 10 Mbit/s come from encoding the sky a second time at
+the same bitrate, which a live system would not do.
+
+For the design this means two things. A live detector on the Jetson should work on the
+camera frames before they are compressed. And recordings for later analysis should be made
+at 20 Mbit/s or more.
+
+## 2.10 Telling a drone from a bird
+
+The detector only says that something small is moving. The next stage has to say what it
+is. Separating drones from birds in video is a known problem with its own series of
+challenges [[16]](/projects/three-pixels-in-the-sky/references/)[[17]](/projects/three-pixels-in-the-sky/references/). A small network was trained for this (four convolution layers, 61 000 weights). It looks
+at a 32 x 32 crop around each candidate and gives one of five answers: drone, bird,
+airplane, helicopter or clutter. On one desktop core it labels 60 candidates in 13 ms.
+
+**The network.** It is a small convolutional network [[57]](/projects/three-pixels-in-the-sky/references/). Each of its four layers
+applies a set of 3 by 3 filters $W$ to its input $x$, normalises the result, and keeps
+the positive part:
+
+$$
+y = \max ( 0, \text{BN}( W * x + b ) )
+$$
+
+The layers have 16, 32, 64 and 64 filters. After each of the first three, the image is
+halved by keeping the largest value in every 2 by 2 block, so a crop of 32 pixels becomes
+4. The largest value of each of the 64 final maps goes into one linear layer that gives a
+score $s_k$ for each of the five classes. In total there are 60 901 weights. The scores
+become probabilities through
+
+$$
+p_k = \frac{e^{s_k}}{\sum_j e^{s_j}}
+$$
+
+**Training.** For $N$ labelled crops with true classes $y_i$, the weights are chosen to
+minimise the cross-entropy
+
+$$
+L = - \frac{1}{N} \sum_{i=1}^{N} \ln p_{y_i}(x_i)
+$$
+
+which is the negative log-likelihood of the labels. It is minimised by gradient descent
+with the AdamW rule [[58]](/projects/three-pixels-in-the-sky/references/), a step size that rises to 0.004 and falls again, and a
+weight decay of 0.001. Each crop is scaled to zero mean and unit spread, and half of the
+crops are mirrored, so that the network cannot use the brightness of the sky or the
+direction of flight.
+
+**Scoring.** The score used is the area under the ROC curve (AUC) for "drone against the rest".
+It has a direct meaning [[59]](/projects/three-pixels-in-the-sky/references/): it is the probability that a randomly chosen drone crop
+gets a higher drone score than a randomly chosen other crop. A value of 0.5 is guessing
+and 1 is perfect.
+
+It was trained in three ways, and each version was tested on data it had not seen:
+
+- **On real flying objects from another camera.** The public Halmstad dataset [[15]](/projects/three-pixels-in-the-sky/references/) has 285 short
+  clips of drones, birds, airplanes and helicopters with labelled boxes, at 640 x 512. The
+  first three quarters of the clips of each class are for training (210 clips, 40 880
+  crops) and the last quarter for testing (70 clips). Every object is used twice:
+  at its own size, and shrunk to 3 to 12 pixels.
+- **On pasted targets in my own sky.** Drones and birds of 2.5 to 14 pixels are pasted into
+  recording A, encoded again and passed through the detector. Each candidate becomes a
+  crop (18 074 crops). The test set is made the same way from recording B (9 707 crops).
+- **On both together.**
+
+<Figure src="/media/three-pixels-in-the-sky/classifier_crops.png" width={100} alt="Six rows of twelve small grey crops. Real drones and birds from the other camera are sharp dots of two to four pixels in front of clouds and trees. Pasted drones and birds in our sky are soft blobs about ten pixels wide. A real aircraft seen by our camera is a soft bright blob like the pasted ones. Noise candidates from our camera show only blocks from the video compression.">
+
+Crops as the classifier sees them, each stretched in brightness. The real aircraft was recorded by my camera in recording B. The objects of the public dataset are sharp and mine are soft spots. That difference is why the classifier fails on my camera.
+
+</Figure>
+
+<Figure src="/media/three-pixels-in-the-sky/classifier_transfer.png" width={100} alt="Bar chart of the area under the curve for drone against everything else. Trained on real data from the other camera: 0.97 on real drones, 0.96 on the same shrunk, 0.66 on pasted drones in our sky. Trained on pasted data: 0.72, 0.71 and 0.83. Trained on both: 0.96, 0.96 and 0.78.">
+
+Drone against everything else, for three training sets and three test sets. 0.5 is chance. A network is only good on the kind of images it was trained on: 0.97 on its own kind and 0.66 on the other.
+
+</Figure>
+
+On one camera the network works. Trained and tested on Halmstad clips, and set so that it
+keeps 95 % of the drones, it lets through 5 % of the clutter and 8 to 13 % of the birds.
+Airplanes and helicopters are harder: 43 % and 32 to 40 % of them pass as drones.
+
+From one camera to another it does not work. The network trained on Halmstad calls 5 035
+of the 5 069 pasted drones in my sky clutter. That could mean that my pasted targets are
+unrealistic. But it says the same about the one real aircraft my camera recorded, in 99 %
+of 1 970 frames. So at least part of the problem is the camera. The Halmstad targets are
+sharp dots, and my lens and encoder deliver a soft blob, as the crops show.
+
+The network trained only on pasted targets has never seen a real flying object. On my
+unmodified recordings it still separates the things that fly from the noise:
+
+| Candidates in recordings A and B, nothing pasted | Frames | Called drone or bird |
+|---|---|---|
+| Not confirmed by the tracker | 5 502 | 2 % |
+| Confirmed, track shorter than one second | 1 858 | 9 % |
+| The aircraft, tracked for 66 seconds | 1 970 | 97 % (as drone) |
+| Eight other tracks of one to six seconds | 527 | 90 % |
+
+What these tracks are was judged by eye. The aircraft is called a drone because this network
+has no class for aircraft. Of the eight short tracks, three are called bird in at least
+90 % of their frames, and the others are a mix of bird, drone and clutter.
+
+What the network cannot do is tell a small drone from a small bird in a single frame. On
+recording B, keeping 95 % of the pasted drones lets through 78 % of the pasted birds. Only
+from 9 pixels upward does that drop to 7 %. Below that size both are the same blob. The
+difference then has to come from how the blob moves over time, or from another sensor.
+
+Training on both sets together keeps both abilities (0.96 on Halmstad, 0.78 on my sky) but
+does not close the gap between the cameras.
+
+## 2.11 Five attempts to improve it
+
+The tests above show three weaknesses: the hovering target (2.6), the object that is
+mistaken for a drone (2.10), and the range at low contrast (2.7). Five ideas were tried
+against them, each with the same tests as before.
+
+| Attempt | Aimed at | Result | Verdict |
+|---|---|---|---|
+| 1. A confirmed track holds on to its target | the hovering drone | hovering at 3 px: 24 % of frames becomes 99 % | works |
+| 2. One second of video as input to the network | drone or bird | birds that pass as drones: 17 % becomes 18 % | no gain |
+| 3. Letting the network vote along a track | drone or bird | birds that pass: 11 % becomes 3 % after one second | works |
+| 4. Training data degraded to look like my camera | a classifier that is blind on my camera | reacts to the real aircraft in 99 % of frames instead of 1 %, but calls it a drone | half works |
+| 5. Summing over time before deciding | faint targets | 2 px target: 52 % becomes 89 %; range gains 0 to 17 m | helps little |
+
+Attempts 2 to 4 concern the classifier, and their lesson is the same as in section 2.10:
+it needs labelled drones recorded with my own camera. The details are in
+`runs/classifier/NOTES.md` in the repository. Attempts 1 and 5 say something about
+the detector itself and are described here.
+
+**Holding on needed a second rule.** The detector loses a hovering target because it only
+reacts to change. A confirmed track now freezes the background under it and searches for
+the spot itself in frames where the change has disappeared. That solved the hovering
+case and created a new problem. On the empty sky of recording A the number of tracks of
+two seconds or more went from zero to seven, all of them weak, motionless and in one
+corner. The detector was holding on to something faint in the scene. A second rule
+was needed: a track may only hold on if it has scored 9 once (the threshold is 5) or has moved 40
+pixels. With it the empty sky is as before.
+
+<Figure src="/media/three-pixels-in-the-sky/hover_hold.png" width={70} alt="Fraction of frames detected against target width for a hovering quadcopter at three contrasts, before and after. At contrast 0.4 the old detector rises from 0.03 at 2 pixels to 0.88 at 12 pixels; the new one is at 0.99 from 3 pixels. At contrast 0.2 the old one stays near or below 0.5; the new one is at 0.26 at 4 pixels and 1.0 from 6 pixels. At contrast 0.8 the new one is at 1.0 for all sizes.">
+
+A hovering quadcopter that appears in place, before (dashed) and after (solid). Two clips, recordings A and B. A track that holds on to its target repairs the hovering case from 3 to 4 pixels upward.
+
+</Figure>
+
+A real drone does not appear out of nothing. It flies in and then stops. In a test where
+the target crosses for five seconds and then hovers, the share of frames detected during
+the hover goes from 24 % to 99 % at 3 pixels and contrast 0.4, and from 16 % to 97 % at 4
+pixels and contrast 0.2. The rule has a price: the detection range does not improve,
+because a drone of one or two pixels far away neither scores 9 nor moves 40 pixels.
+
+**Summing over time works in theory and little on my sky.** A faint target that keeps its
+course should become visible if the evidence is added up along its path before a
+threshold is applied. This is known as track-before-detect [[19]](/projects/three-pixels-in-the-sky/references/)[[60]](/projects/three-pixels-in-the-sky/references/). For an assumed
+motion $v$ in pixels per frame the detector keeps a sum that fades with a factor $\gamma$:
+
+$$
+A_t^{v}(x) = d_t(x) + \gamma A_{t-1}^{v}(x - v)
+$$
+
+A target that moves with $v$ adds up in the same place of the sum. Its amplitude grows by
+$\frac{1}{1 - \gamma}$, while independent noise only grows by
+$\frac{1}{\sqrt{1 - \gamma^2}}$. For $\gamma = 0.8$ that is a factor 5 against 1.67, a gain
+of 3 in signal-to-noise ratio. If the noise has a correlation $\rho$ from frame to frame,
+its variance grows by an extra factor $\frac{1 + \gamma \rho}{1 - \gamma \rho}$. On artificial frames
+with independent noise it does what the theory predicts: a spot of 1.5 times the noise
+level is found in 99 % of frames, where the plain detector finds it in 2 %. On my sky the
+first version gained almost nothing, for a reason that can be measured. The noise of the sky is not
+independent from frame to frame. Half of it is still there in the next frame, so the
+summed noise grows by a factor of 2.5 where independent noise would give 1.67. A finer
+version with 25 assumed motions finds a 2 pixel target in 89 % of frames instead of 52 %,
+at six times the computing. In metres it gives 0 to 17 m, because a drone that flies
+straight at the camera hardly moves in the image while it is far away. The same
+correlation in time returns in section 5.6, where it misleads the tracker.
+
+## 2.12 Limits
+
+- **The targets are a model.** There is no real lighting on the airframe, no propeller
+  flicker and no rolling shutter, and the approach is one straight path with a weave. The
+  compression of the target is modelled, but not the camera's own noise reduction and
+  sharpening.
+- **The only check against real drones is on another camera.** On the public Halmstad
+  dataset [[15]](/projects/three-pixels-in-the-sky/references/) (640 x 512, heavily compressed, drones of 16 pixels and more) an earlier version
+  of the same detector put a candidate on the labelled drone in 96 % of frames over 61
+  clips from a static camera.
+- **One sky.** Cloudless, around three in the afternoon, with almost no pixel noise (0.16
+  grey levels in open sky). Cloud edges, haze, dusk and rain are not covered, and
+  all of them will reduce the range.
+- **The field of view is assumed** (67 degrees) and the camera is not calibrated. The
+  ranges scale with it.
+- **The sky under every pasted target has been encoded twice**, once by the recorder and
+  once by the test. At 10 Mbit/s the second pass adds about four stray candidates per
+  frame that a real recording does not have.
+- **The classifier has not seen a real drone on my camera.** It is trained on pasted
+  targets. The test clips of the public dataset may come from the same sessions as the
+  training clips. Its only check on real objects is a handful of tracks named by eye.
+- **Speed.** About 7 frames per second at 1920 x 1080 on one desktop core, and not measured
+  on the Jetson. It is not a live detector yet.
+
+## 2.13 How this compares with the literature
+
+**Detecting by motion.** Finding what changes against a learned background is one of the
+oldest methods in video analysis [[53]](/projects/three-pixels-in-the-sky/references/). For flying objects it remains the method of
+choice when the target is only a few pixels wide. A well-known study on detecting
+aircraft and drones from a moving camera concluded that appearance in a single frame is
+not enough at that size and that the motion over several frames has to be used
+[[43]](/projects/three-pixels-in-the-sky/references/). The detector here is the version of that idea for a camera that stands still.
+
+**How many pixels are needed.** A criterion from 1958 still describes this well
+[[46]](/projects/three-pixels-in-the-sky/references/). An observer detects an object when about one pair of light and dark lines fits
+across it, which is two pixels. Recognising what kind of object it is takes about four
+pairs, eight pixels, and identifying it six to eight pairs. The detector here becomes reliable
+between two and four pixels, and the classifier starts to separate drones from birds at
+nine pixels. Both agree with the criterion. It also means that no amount of training
+will make a classifier name a target of three pixels. That takes more pixels, from a
+longer lens or from a shorter distance, which is the argument of chapter 6.
+
+**Drones and birds.** The public dataset used here reports its results by the size of the
+drone in the image, down to a class of one to five pixels [[15]](/projects/three-pixels-in-the-sky/references/), which is where my
+tests start. A series of international challenges on telling drones from birds in video
+shows the same two difficulties: the smallest targets are missed, and birds cause
+most of the false alarms [[16]](/projects/three-pixels-in-the-sky/references/)[[17]](/projects/three-pixels-in-the-sky/references/). A larger benchmark for following drones in
+thermal and daylight video exists as well [[54]](/projects/three-pixels-in-the-sky/references/).
+
+**Small targets in infrared.** The closest relatives of this detector come from infrared
+search systems, where a target of a few pixels against sky and cloud has been the
+standard problem for decades. A recent review sorts the methods into those that look at
+the local contrast in one frame and those that use motion over several frames
+[[61]](/projects/three-pixels-in-the-sky/references/). The detector here combines one of each.
+
+**What this test adds and lacks.** The published results come from the cameras of their
+authors. A range curve cannot be carried over to another camera, because it depends on
+the lens, the sensor noise and the video encoder. This chapter measures that curve for
+my camera, including the loss in the encoder, which does not seem to be reported elsewhere.
+What it lacks is what the published work has: real drones.
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

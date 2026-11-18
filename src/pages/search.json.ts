@@ -4,7 +4,7 @@
  */
 import type { APIRoute } from 'astro';
 import { getCollection, render } from 'astro:content';
-import { publishedChapters } from '../lib/chapters';
+import { publishedChapters, isReferences } from '../lib/chapters';
 
 export interface SearchEntry {
   /** What is shown in bold. */
@@ -45,7 +45,7 @@ export const GET: APIRoute = async () => {
     const project = projects.find((p) => p.id === projectId);
     const url = `/projects/${projectId}/${slug}/`;
     const num = String(c.data.number).padStart(2, '0');
-    const label = c.data.number < 10 ? `${num} · ${c.data.title}` : c.data.title;
+    const label = c.data.number < 10 && !isReferences(c.id) ? `${num} · ${c.data.title}` : c.data.title;
     entries.push({ title: label, group: project?.data.title ?? projectId, url, kind: 'page', keywords: c.data.summary });
     const { headings } = await render(c);
     for (const h of headings.filter((h) => h.depth === 2 || h.depth === 3)) {

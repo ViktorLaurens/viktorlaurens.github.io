@@ -1,0 +1,370 @@
+---
+project: three-pixels-in-the-sky
+number: 5
+title: "From an alert to a position"
+summary: "Adding up weak evidence from sensors that each fail in some weather, a Kalman filter whose uncertainty is tested on real aircraft and bird tracks, and one flight followed from 3 km to the site."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapters 2 to 4 looked at one sensor at a time. This chapter combines them. A small model
+shows how the alerts of different sensors should be added up when each sensor fails in
+some kind of weather, a tracker is tested on the real tracks of chapter 2, and one flight
+is followed from 3 km to the site.
+
+The camera and microphone numbers in the model are the measurements of chapters 2 and 3.
+The two long-range sensors are assumptions based on the literature.
+
+## 5.1 The long-range sensors
+
+The camera of chapter 2 first holds a 0.30 m drone at 127 to 186 m, and the microphone of
+chapter 3 hears a Crazyflie at tens of metres. Radar and radio receivers reach
+kilometres [[5]](/projects/three-pixels-in-the-sky/references/)[[8]](/projects/three-pixels-in-the-sky/references/). According to the calculations of chapter 4, a radio receiver hears a 100 mW video link
+at 1 to 2 km near the ground and gives a bearing with an error of about 5 degrees, which
+is also what commercial sensors are specified for [[11]](/projects/three-pixels-in-the-sky/references/)[[12]](/projects/three-pixels-in-the-sky/references/). It hears nothing from
+a drone that does not transmit [[9]](/projects/three-pixels-in-the-sky/references/). A small radar detects a drone of 0.01 square metre
+at several kilometres and gives range and bearing at once, but it needs a line of sight
+and it sees every bird as well [[14]](/projects/three-pixels-in-the-sky/references/)[[13]](/projects/three-pixels-in-the-sky/references/).
+
+In the model below, the radio receiver reports a transmitting drone in 80 % of the seconds
+within 2 km, decreasing to zero at 3 km. The radar reports any drone in 70 % of the seconds
+within 1.5 km, decreasing to zero at 2.5 km. These two curves are assumptions within the range of the published figures.
+
+## 5.2 Why a zoom camera needs to be pointed
+
+A camera can see a small drone at 2 km, but only through a narrow window. To get four
+pixels on a 0.30 m drone at 2 km, the formula of section 2.2 gives a field of view of 8
+degrees for a sensor that is 3840 pixels wide. The full horizon then takes 45 windows, and
+every elevation band doubles that number. If the camera scans blindly at one window per
+second, the drone has flown a kilometre before the camera returns to the same window.
+
+With a radio bearing that is accurate to 5 degrees, the same camera needs one or two
+windows per elevation band. So the long-range sensors and the camera do not compete. The
+long-range sensors tell the camera where to look.
+
+## 5.3 Adding up weak evidence
+
+Every sensor is treated in the same way. Once per second it either reports something or it
+does not. It reports a drone that is really there with probability $p_d$, and it reports
+something that is not a drone with probability $p_f$. A report then counts as
+
+$$
+\ell = \ln \tfrac{p_d}{p_f}
+$$
+
+and a second without a report counts as $\ln \tfrac{1 - p_d}{1 - p_f}$, which is negative.
+This is the log-likelihood ratio of sequential testing [[24]](/projects/three-pixels-in-the-sky/references/). The fusion adds these
+values over all sensors and over time, and never lets the sum drop below zero, as in a
+cumulative-sum test [[25]](/projects/three-pixels-in-the-sky/references/):
+
+$$
+S_t = \max(0, S_{t - 1} + \sum_i \ell_{i,t})
+$$
+
+This sum has a useful property. As long as there is no drone, every term is negative on
+average and the sum stays near zero. Once a drone is present, the terms are positive on
+average, and the sum climbs at a rate equal to the information each second carries. The
+time to an alarm is roughly the threshold divided by that rate, and among all tests with
+the same rate of false alarms this one has the shortest delay in the worst case
+[[63]](/projects/three-pixels-in-the-sky/references/).
+
+It declares a drone when $S_t$ exceeds a threshold. The threshold comes from running the
+model without a drone and allowing one false declaration in 24 hours. A sensor with few
+false reports gets a large $\ell$ and can almost declare a drone on its own. A sensor with
+many false reports gets a small one and needs support from the others.
+
+The inputs are:
+
+| Sensor | Reports a drone that is there | False reports | Source |
+|---|---|---|---|
+| Camera | the detection curve against range from chapter 2 at contrast 0.4; contrast 0.2 in haze; nothing at night | 0.02 per second | measured: 11 tracks of one second or more in 10 minutes of empty sky |
+| Microphone | the rotor-tone detector from chapter 3 with a margin of 40 dB; 20 dB in wind | 0.001 per second; 0.01 in wind | detector as designed; the wind values are assumed |
+| Radio receiver | 80 % within 2 km, if the drone transmits | 0.001 per second | assumed |
+| Radar | 70 % within 1.5 km | 0.01 per second | assumed |
+
+A drone flies straight in from 4 km at 12 m/s, 400 times for each case. Two ways are compared
+of weighting the reports. With **fixed weights** every report counts as much as it would
+on a clear and calm day. With **weights that follow the conditions** a report counts as
+much as it is worth at that moment. A report from the camera at night then counts for
+nothing, because at night the camera only produces false reports, and a report from the
+microphone in wind counts for less.
+
+<Figure video="/media/three-pixels-in-the-sky/evidence.mp4" poster="/media/three-pixels-in-the-sky/evidence.webp" ratio="1600 / 760" width={100} alt="Top: one mark per second for the camera and for the microphone while a drone flies in from 300 m through haze; the camera starts to report near 110 m, the microphone near 100 m. Bottom: the evidence sum against distance, at zero until 120 m, then rising in steps and crossing the threshold at 100 m, where the drone is declared.">
+
+One simulated flight through haze. Top: the seconds in which each sensor reports. Bottom: the evidence sum and its threshold. No single report raises an alarm. A few reports close together do, and a second without a report takes a little evidence away again.
+
+</Figure>
+
+## 5.4 What the model shows
+
+<Figure src="/media/three-pixels-in-the-sky/fusion_ranges.png" width={85} alt="Bar chart of the range at which a drone is declared, for four kinds of weather and four ways of using the camera and the microphone. Clear and calm: camera alone 148 m, microphone alone 76 m, both with fixed weights 124 m, both with weights that follow the conditions 148 m. Haze: 88, 76, 88 and 100 m. Night: camera never, microphone 76 m, fixed weights 64 m, following weights 76 m. Wind: camera 148 m, microphone never, fixed 124 m, following 148 m.">
+
+Median range at which a drone is declared, with camera and microphone only, alone and together. The model works in steps of 12 m. Together they give no more range by day, but there is no weather left in which the system is blind.
+
+</Figure>
+
+The figure shows three things.
+
+- **Each sensor has a kind of weather in which it never declares a drone.** For the camera
+  that is night, for the microphone wind.
+- **With weights that follow the conditions, the pair is as good as its better sensor in
+  every kind of weather.** In haze it is slightly better (100 m against 88 m), because
+  both sensors are weak there and their evidence adds up. The system does not need to know
+  beforehand which sensor will be the good one that day.
+- **With fixed weights, the pair is worse than its better sensor.** It reaches 124 m
+  against 148 m by day and 64 m against 76 m at night, and 3 % of the night flights are
+  not declared at all before 30 m. The false reports of the camera at night are counted
+  as if they meant something, so the threshold has to go up for everything.
+
+So combining the sensors well does not give more range. It makes sure that there is no
+kind of weather in which the system is blind, without losing anything in the weather where
+one sensor would have been enough.
+
+With the two assumed long-range sensors added, a drone that transmits is declared at about
+2.6 km and a drone that does not at about 1.9 km, in every kind of weather. The radio
+receiver handles the first case and the radar the second. The camera and the microphone
+then no longer decide when a drone is declared. They decide what it is and where exactly
+it is, which is the subject of the next section.
+
+## 5.5 What a report is worth in metres
+
+A bearing with an error $\sigma_\theta$ (in radians) at range $r$ places the drone within
+
+$$
+e = r \sigma_\theta
+$$
+
+across the line of sight. It says nothing about the distance along the line of sight.
+
+| Report | Bearing error | Across the line of sight | Along it |
+|---|---|---|---|
+| Radio receiver at 2.6 km | 5 degrees (specified) | 230 m | unknown from one site |
+| Radar at 1.9 km | 1 degree (assumed) | 33 m | metres to tens of metres |
+| The camera of chapter 2 at 150 m | one pixel, 0.035 degrees | 0.1 m | unknown from one camera |
+| Two phones at 50 m | a few degrees at best (chapter 3) | several metres | unknown |
+
+The bearing of the camera is more than a hundred times finer than that of the radio
+receiver, but the camera gives no range at all. Two cameras give range by triangulation.
+The error grows with the square of the distance and decreases with the baseline $B$
+between the cameras:
+
+$$
+\sigma_r = \tfrac{\sqrt{2} r^2 \sigma_\theta}{B}
+$$
+
+For a drone at 150 m and an error of one pixel in each camera, this gives about 100 m for
+a baseline of 0.2 m, 10 m for 2 m, and 1 m for 20 m. The two cameras of chapter 2 are mounted a
+hand's width apart on one case, so as a pair they cannot measure the range of a drone at
+any useful distance. Twenty metres apart, they could.
+
+The chain for the rough location is then as follows. A radio bearing or a radar detection
+gives a box of hundreds of metres at a distance of kilometres. A camera that is pointed
+into that box reduces it to decimetres across the line of sight. A second site, a radar
+range or a laser rangefinder gives the missing dimension.
+
+## 5.6 A track with an uncertainty
+
+A detection is a point in one frame. What the next sensor needs is a track: where the
+object is now, how it moves, and how sure the system is. This section runs a Kalman
+filter [[44]](/projects/three-pixels-in-the-sky/references/)[[28]](/projects/three-pixels-in-the-sky/references/) on the tracks of chapter 2 and tests whether its uncertainty can
+be trusted. One camera measures a direction and no range, so the filter works in the
+image.
+
+**The model.** The state holds the position $p$ in the image and its velocity $v$,
+$x = (p, v)$. Between two frames, a time $\Delta t$ apart, the filter assumes a constant
+velocity that is disturbed by a random acceleration of strength $q$:
+
+$$
+p_{k+1} = p_k + \Delta t \cdot v_k, \qquad v_{k+1} = v_k + w_k, \qquad \text{var}(w_k) = q \Delta t
+$$
+
+In matrix form this is $x_{k+1} = F x_k + w_k$ with noise covariance $Q$. A detection
+measures the position with an error of $r$ pixels in each direction: $z_k = H x_k + n_k$,
+where $H$ picks the position out of the state and $n_k$ has covariance $R = r^2 I$.
+
+**Predict.** The filter carries an estimate $\hat{x}$ and its covariance $P$, the
+uncertainty of that estimate. Without a new measurement both are moved forward with the
+model, and the uncertainty grows:
+
+$$
+\hat{x}^- = F \hat{x}, \qquad P^- = F P F^T + Q
+$$
+
+**Update.** A detection $z$ differs from what the filter expected by the innovation
+$\nu$, and the filter knows how large that difference should be:
+
+$$
+\nu = z - H \hat{x}^-, \qquad S = H P^- H^T + R
+$$
+
+The estimate is corrected by a fraction $K$ of the innovation:
+
+$$
+K = P^- H^T S^{-1}, \qquad \hat{x} = \hat{x}^- + K \nu, \qquad P = (I - K H) P^-
+$$
+
+The gain $K$ is the choice that makes the remaining uncertainty $P$ as small as
+possible. In one dimension it reads $K = \frac{P^-}{P^- + R}$, which shows what it does.
+When the prediction is uncertain compared with the measurement, $K$ is close to 1 and the
+filter follows the detection. When the measurement is noisy, $K$ is close to 0 and the
+filter keeps its prediction. For linear models with Gaussian noise no other estimator
+has a smaller error. For numerical safety the code uses the equivalent form
+$P = (I - KH) P^- (I - KH)^T + K R K^T$, which stays symmetric.
+
+**Is the uncertainty right?** The innovation gives one test value per frame:
+
+$$
+\epsilon_k = \nu_k^T S_k^{-1} \nu_k
+$$
+
+If the filter describes the target and the detector correctly, $\epsilon_k$ follows a
+chi-square distribution with two degrees of freedom: its mean is 2, and 95 % of the
+values lie below 6. When the true position is known, the same value can be computed with
+the true error and $P$ in place of $\nu$ and $S$. These are the standard consistency
+tests [[28]](/projects/three-pixels-in-the-sky/references/).
+
+**Choosing $q$ and $r$.** The innovations also give the likelihood of the detections
+under the model,
+
+$$
+\ln L(q, r) = - \frac{1}{2} \sum_k \left( \nu_k^T S_k^{-1} \nu_k + \ln \det ( 2 \pi S_k ) \right)
+$$
+
+and $q$ and $r$ are chosen to maximise it for each track.
+
+**Predicting without detections.** After a time $h$ without a detection, the variance of
+the predicted position is
+
+$$
+\sigma_p^2(h) = P_{pp} + 2 h P_{pv} + h^2 P_{vv} + \frac{q h^3}{3}
+$$
+
+The first three terms carry the uncertainty the filter already had, and the last is what
+the target may have done in the meantime. For long gaps the spread grows with
+$h^{\frac{3}{2}}$, so doubling the gap almost triples the area to search.
+
+There are six tracks. Five are real: the aircraft of recording B (1288 detections in
+43 seconds) and four birds (between 37 and 170 detections). The sixth is a pasted
+drone that flies in from 272 m to 168 m, for which the true position is known in every
+frame. Deciding which detection belongs to which track is a subject of
+its own [[48]](/projects/three-pixels-in-the-sky/references/). Here the tracks are taken as the detector formed them.
+
+<Figure src="/media/three-pixels-in-the-sky/tracker.png" width={100} alt="Three panels. Left: the six tracks drawn in the image in degrees; the aircraft crosses the upper right slowly, the birds cross large parts of the image. Middle: fitted manoeuvre noise on a logarithmic axis, from 0.18 degrees per second for the aircraft and 0.33 for the pasted drone to between 0.85 and 8.5 for the four birds. Right: predicted 95 percent radius and observed median miss against seconds without a detection, on a logarithmic axis; the aircraft stays below 1 degree for 10 seconds, the pasted drone passes 4 degrees after about 4 seconds, a bird after 1 second.">
+
+Left: the six tracks in the image. Middle: how much each object changes its velocity. Right: how fast the predicted position becomes uncertain when the detections stop. Birds change their velocity up to 47 times more than the aircraft, and a cue for a bird is out of date after one second.
+
+</Figure>
+
+| Track | Fitted error of a detection | Fitted change of angular velocity in one second | Mean of the test value (2 expected) | Inside the 95 % region |
+|---|---|---|---|---|
+| Aircraft | 0.3 px | 0.18 degrees per second | 2.25 | 92 % |
+| Pasted drone | 0.4 px | 0.33 | 1.85 | 94 % |
+| Bird 2 | 0.5 px | 0.85 | 2.12 | 90 % |
+| Bird 3 | 0.65 px | 2.7 | 2.07 | 94 % |
+| Bird 4 | 1.3 px | 2.7 | 1.69 | 93 % |
+| Bird 1 | 0.65 px | 8.5 | 2.11 | 94 % |
+
+From one frame to the next, the filter is consistent on every track. Three further tests
+show where that stops being enough.
+
+**1. Consistent on the next frame is not consistent seconds ahead.** A cue for a zoom
+camera or for a friendly drone is a prediction over seconds. With the detections of the
+aircraft hidden for a few seconds, the filter predicts, and the prediction can be
+compared with where the detector saw the aircraft afterwards. After 5 seconds the filter claimed an
+error of 31 pixels and the real miss was 6 pixels. It was five times too cautious.
+The reason is in the detector. Its position errors are not independent from frame to
+frame. On the pasted drone, where the truth is known, the error in one frame has a
+correlation of 0.54 with the error in the next. The filter can only explain such a slow
+wobble as a manoeuvre of the target, and a manoeuvre grows over time where a wobble does
+not. When $q$ is chosen so that the prediction 2 seconds ahead is consistent, it becomes
+215 times smaller. After 10 seconds without detections the filter then claims 0.25 degrees,
+the median miss is 0.25 degrees, and 97 % of the predictions fall inside the 95 % region.
+But the test on the next frame now fails, with a mean of 3.1. A filter with white noise
+cannot be right on both time scales, so it has to be tuned for the time scale on which
+its output is used. The proper solution is to give the slow error of the detector its
+own state in the filter: an error $e_k = \rho e_{k-1} + u_k$ with $\rho$ near 0.5, estimated
+together with the position.
+
+**2. Against the truth the filter is too confident.** For the pasted drone the filtered
+position is off by 0.48 pixels, which is 0.019 degrees, and better than a single
+detection at 0.65 pixels. But the filter claims less than that. The same test value, now
+computed against the true position, has a mean of 7.2 where 2 is expected. With the
+detection error measured against the truth instead of fitted, it is 3.1. The cause is
+again the correlated error, together with a constant offset of 0.2 pixels in the
+vertical direction.
+
+**3. How an object moves says what it is.** The fitted change of velocity differs by a
+factor of 46 between the aircraft and the most agile bird. The classifier of chapter 2
+looks at the pixels of one crop and fails on small targets. This number needs no pixels
+on the target at all. A real drone cannot be placed on this scale yet, because the path
+of the pasted drone comes from a model.
+
+For a bird the model itself is wrong. After 2 seconds without detections only 50 % of
+the predictions for bird 3 are inside the 95 % region. A bird does not fly at a constant
+velocity with small disturbances. It turns.
+
+<Figure video="/media/three-pixels-in-the-sky/tracker_blackout.mp4" poster="/media/three-pixels-in-the-sky/tracker_blackout.webp" ratio="1680 / 800" width={100} alt="Two video panels. Left: a magnified patch of sky with a high aircraft; the detections are hidden for several seconds, a yellow circle of 0.15 degrees radius marks the 95 percent region of the prediction, and a red dot inside it marks where the detector saw the aircraft. Right: a bird crossing above trees, with its 95 percent region while the detections are used.">
+
+The filter predicting through a gap in the detections, for the aircraft and for a bird. For the aircraft the true position stays inside the predicted region for seconds. For a bird the region grows too fast to be of use.
+
+</Figure>
+
+The right panel of the figure above gives the practical answer. The zoom camera of
+section 5.2 has a window of 8 degrees, so a cue is useful while its 95 % region is
+smaller than 4 degrees. For the aircraft that is the case for more than 10 seconds, for
+the pasted drone for about 4 seconds, and for a bird for 1 second. A system that takes
+longer than that to turn a camera has to keep detecting while it turns.
+
+## 5.7 One flight, start to finish
+
+To tie the numbers of the chapters together, this section follows one drone of 0.30 m that flies
+straight at the site at 12 m/s, by day and in clear weather. It starts 3 km out, which is
+250 seconds before it arrives.
+
+<Figure src="/media/three-pixels-in-the-sky/one_flight.png" width={100} alt="Horizontal bars on a logarithmic distance axis from 3 km down to 20 m, with a second axis for the seconds until arrival. Radio receiver from 3000 m, radar from 2500 m, thermal camera from 1800 m, daylight camera in 4K from 295 m and at 1080p from 186 m, microphone from 88 m, classifier from 48 m. Dashed lines mark where the drone is declared: 2.7 km if it transmits, 1.9 km if it is silent, 148 m with camera and microphone alone.">
+
+One drone flying in from 3 km at 12 m/s: from where each sensor reports, and where the drone is declared. Blue bars are calculated or assumed, yellow bars come from the recordings. The long-range sensors give minutes of warning and the sensors I built give seconds.
+
+</Figure>
+
+| Distance | Time left | What happens | What is known then |
+|---|---|---|---|
+| 2.7 km | 220 s | the radio receiver has heard the video link often enough: a drone is declared | a bearing of 5 degrees, a strip 230 m wide, no range |
+| 1.9 km | 160 s | the radar has seen it often enough: declared even if it is silent | range and bearing, a box of tens of metres |
+| 1.8 km | 150 s | a thermal camera pointed there could see its warm parts; a radar could resolve the blade flashes | a first sign of what it is |
+| 295 to 186 m | 25 to 16 s | the camera of chapter 2 picks it up, in 4K and at 1080p; it is 2 pixels wide | a bearing to 0.035 degrees, 0.1 m across; the tracker starts |
+| 148 m | 12 s | camera and microphone alone would declare it here | |
+| 88 m | 7 s | the microphone hears the rotor tones | it has rotors |
+| 48 m | 4 s | it is 9 pixels wide and the classifier can tell it from a bird | what it is, from the image |
+
+The first two rows use the assumed curves of section 5.1 and the third the calculations
+of chapter 4. The rows below come from the recordings.
+
+Three things stand out. The hardware built for this report gives 12 to 25 seconds of warning, and the
+long-range sensors give about three minutes. With these sensors the identity comes last, 4
+seconds before the drone arrives, which is too late to be of use. And the range is never
+known from these sensors alone.
+
+This is the case for the last step of the chain. Suppose a friendly drone that flies at
+20 m/s is sent out when the radar declares the intruder at 1.9 km. The two approach each
+other at 32 m/s and meet after 59 seconds, 1.2 km from the site. There its camera has
+the 9 pixels that the camera on the ground only gets at 48 m, with a minute and a half
+left. The speed of 20 m/s is an assumption.
+
+## 5.8 Limits
+
+- **It is a simple model.** One report per sensor per second, independent from second to
+  second, and a drone that flies straight at the site. Chapter 2 showed that the noise of
+  the sky is not independent from frame to frame, and real false alerts come in bursts (a
+  flock of birds, a gust of wind).
+- **The long-range sensors are assumed**, based on a datasheet and a survey. Their curves
+  determine the 2.6 km and the 1.9 km, and nothing else supports those two numbers.
+- **The weather is assumed as well.** "Haze" is the curve for contrast 0.2, "night" is a
+  camera that sees nothing, and "wind" takes 20 dB off the microphone's margin and gives
+  it ten times more false reports. The camera curves come from one cloudless afternoon.
+- **The system is told what the weather is.** Weights that follow the conditions require
+  that the conditions are known. Estimating them from the behaviour of the sensors, for
+  example from the rate of false reports in the last minutes, is the real problem. It is not attempted here.
+- **The microphone curve is for a Crazyflie against pink noise with an assumed margin**
+  (chapter 3).
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

@@ -12,6 +12,8 @@ const projects = defineCollection({
       featured: z.boolean().default(false),
       order: z.number().default(0),
       repo: z.string().url().optional(),
+      /** The full report as a PDF under public/, offered as a download button in the header. */
+      report: z.string().optional(),
       cover: image().optional(),
       coverAlt: z.string().optional(),
       coverVideo: z.string().optional(),

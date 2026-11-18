@@ -2,7 +2,9 @@
 import { getCollection, render } from 'astro:content';
 import Base from '../../layouts/Base.astro';
 import LoopVideo from '../../components/LoopVideo.astro';
-import { publishedChapters } from '../../lib/chapters';
+import { publishedChapters, isReferences } from '../../lib/chapters';
+import { statSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 export async function getStaticPaths() {
   const projects = await getCollection('projects');
@@ -11,8 +13,12 @@ export async function getStaticPaths() {
 
 const { project } = Astro.props;
 const { Content, headings } = await render(project);
-const { title, summary, date, tags, repo, heroVideo, heroPoster, heroAlt, status, outline, outlineNote } = project.data;
+const { title, summary, date, tags, repo, report, heroVideo, heroPoster, heroAlt, status, outline, outlineNote } = project.data;
 const soon = status === 'soon';
+// The report's size for its download button, read from the file at build time.
+const reportFile = report && join(process.cwd(), 'public', report);
+const reportSize = reportFile && existsSync(reportFile) ? `${(statSync(reportFile).size / 1e6).toFixed(1)} MB` : undefined;
+const reportName = `${title.replace(/[^A-Za-z0-9]+/g, '_')}_report.pdf`;
 const toc = headings.filter((h) => h.depth === 2);
 const chapters = (await publishedChapters(project.id))
   .sort((a, b) => a.data.number - b.data.number);
@@ -31,7 +37,18 @@ const chapterSlug = (id: string) => id.split('/').pop();
       <p class="lede">{summary}</p>
       <div class="project__meta">
         {tags.length > 0 && <div class="tags">{tags.map((t) => <span class="tag">{t}</span>)}</div>}
-        {repo && <a class="btn btn--sm" href={repo} target="_blank" rel="noopener">View code →</a>}
+        {(repo || report) && (
+          <div class="project__actions">
+            {report && (
+              <a class="btn btn--sm btn--primary" href={report} download={reportName}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M4.5 16.5v2a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2" /></svg>
+                <span>Download the report</span>
+                <span class="project__filesize mono">PDF{reportSize && ` · ${reportSize}`}</span>
+              </a>
+            )}
+            {repo && <a class="btn btn--sm" href={repo} target="_blank" rel="noopener">View code →</a>}
+          </div>
+        )}
       </div>
     </header>
 
@@ -49,13 +66,13 @@ const chapterSlug = (id: string) => id.split('/').pop();
       <section class="chapters" aria-labelledby="chapters-title">
         <div class="section__head">
           <h2 id="chapters-title">Chapters</h2>
-          <p class="eyebrow">{chapters.length} parts</p>
+          <p class="eyebrow">{chapters.filter((c) => !isReferences(c.id)).length} parts</p>
         </div>
         <ol class="chapters__list">
           {chapters.map((c) => (
             <li>
               <a class="chapter" href={`/projects/${project.id}/${chapterSlug(c.id)}/`}>
-                <span class="chapter__num mono">{String(c.data.number).padStart(2, '0')}</span>
+                <span class="chapter__num mono">{isReferences(c.id) ? '§' : String(c.data.number).padStart(2, '0')}</span>
                 <span class="chapter__body">
                   <span class="chapter__title">{c.data.title}</span>
                   <span class="chapter__summary">{c.data.summary}</span>
@@ -112,6 +129,10 @@ const chapterSlug = (id: string) => id.split('/').pop();
   .project :global(.project__hero) { margin-bottom: var(--space-10, 2.5rem); max-width: 60rem; }
   .project__head { display: grid; gap: var(--space-4); max-width: 60rem; margin-bottom: var(--space-12); }
   .project__meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-2); }
+  .project__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+  .project__actions .btn { display: inline-flex; align-items: center; gap: .5em; }
+  .project__actions svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .project__filesize { font-size: .78em; opacity: .75; }
   .chapters { margin-bottom: var(--space-16); }
   .chapters__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
   .chapter { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: var(--space-4); align-items: center; padding: var(--space-4) var(--space-5, 1.25rem); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg-raised); text-decoration: none; color: inherit; transition: border-color .2s var(--ease), transform .2s var(--ease); }

@@ -1,5 +1,5 @@
 /**
- * Interactive phase portrait of the damped pendulum (Pendulum Lab, chapter 1).
+ * Interactive phase portrait of the damped pendulum (The Furuta Pendulum, chapter 1).
  * Click anywhere in the unwrapped state space to release a trajectory; the sliders
  * change μ and ω₀² and the vector field re-draws at once.
  */

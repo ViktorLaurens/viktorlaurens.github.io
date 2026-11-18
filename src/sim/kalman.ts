@@ -1,6 +1,6 @@
 /**
  * Live Kalman filtering of a pendulum from noisy angle measurements
- * (Pendulum Lab, chapter 5). The truth runs at 100 Hz; a linear Kalman filter or an
+ * (The Furuta Pendulum, chapter 5). The truth runs at 100 Hz; a linear Kalman filter or an
  * extended Kalman filter estimates angle and angular velocity from the measured angle,
  * optionally gating outliers by their normalised innovation.
  */
