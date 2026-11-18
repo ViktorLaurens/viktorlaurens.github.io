@@ -9,7 +9,7 @@ webpage"). Not a blog that needs weekly posts. Not a demo of web tricks: every a
 carries meaning.
 
 **Signature idea.** The site is itself a controlled system. The hero is a live pendulum running
-the same equations as Pendulum Lab chapter 1. Drag it, flick it, watch the phase portrait draw
+the same equations as The Furuta Pendulum chapter 1. Drag it, flick it, watch the phase portrait draw
 itself, then switch the controller on and watch it swing up and balance.
 
 **Visitors.**
@@ -20,7 +20,7 @@ itself, then switch the controller on and watch it swing up and balance.
 **Structure.** Home · Projects (filterable index) · Project pages (long form, side chapter nav)
 · About (story, web CV, PDF download, publications) · Playground (later).
 
-**Look.** Near-black background so Pendulum Lab's Manim-style figures blend in. Accent blue
+**Look.** Near-black background so The Furuta Pendulum's Manim-style figures blend in. Accent blue
 `#58C4DD`, secondary yellow `#F7D96F`, teal `#5CD0B3`, red `#FC6255`. IBM Plex Sans for text,
 IBM Plex Mono for numbers, labels and equations' surroundings. Light mode available.
 

@@ -1,0 +1,211 @@
+---
+project: three-pixels-in-the-sky
+number: 1
+title: "How to detect and locate a drone"
+summary: "What a drone gives away, how far each sensor reaches, the four questions from a first alert to a position, and what Norway adds: darkness, weather, terrain and distance."
+---
+import Figure from '../../../components/Figure.astro';
+
+A drone that costs a few hundred euros can stop an airport or damage infrastructure that
+is worth millions. In December 2018, reported drone sightings disrupted Gatwick Airport for
+three days. More than 1 000 flights were cancelled and the cost to the airlines was
+estimated at 50 million pounds [[3]](/projects/three-pixels-in-the-sky/references/). In September 2025 drone sightings closed the airspace of Oslo airport for three
+hours, on the same night that Copenhagen airport was closed [[41]](/projects/three-pixels-in-the-sky/references/). Norway's drone strategy for the defence sector
+calls reducing the vulnerability to hostile drones the "most significant and urgent
+challenge", and it states that detection is a precondition for any active protection
+[[1]](/projects/three-pixels-in-the-sky/references/). A white paper of the Norwegian government treats unauthorised and malicious use of
+drones as a matter of civil protection [[2]](/projects/three-pixels-in-the-sky/references/).
+
+To protect infrastructure, a drone has to be detected and located before it can do any
+harm. This chapter describes how that can be done: what a drone gives away, which sensor
+picks up each of those signs and from what distance, and in which order the sensors should
+work together. The chapters after it test the parts that could be built.
+
+## 1.1 Three kinds of drone
+
+Drones differ in how they are controlled, and that decides which sensors can find them.
+
+- **Remote-controlled.** A pilot steers it over a radio link and usually gets video back
+  over the same link. This is the common case, and the radio link is the easiest thing to
+  detect.
+- **Tethered by optical fibre.** The drone unrolls a thin fibre behind it and is steered
+  through that. There is no radio link at all. Reports from the war in Ukraine describe
+  these drones and the attempts to find them with microphones and infrared light [[9]](/projects/three-pixels-in-the-sky/references/).
+- **Autonomous.** It flies a route that was programmed before take-off and does not need
+  to transmit anything.
+
+A system that only listens for radio finds the first kind and misses the other two. The
+starting point therefore has to be what every drone gives away, and not one sensor.
+
+## 1.2 What a drone gives away
+
+| What | Which sensor picks it up | When it does not work |
+|---|---|---|
+| The radio it transmits | a radio receiver with a direction-finding antenna | the drone does not transmit (fibre, autonomous) |
+| The radio waves it reflects | radar | the drone flies low behind buildings or terrain; birds give a similar echo |
+| The light it reflects or blocks | a camera | night, fog, and when the drone is too far to cover a few pixels |
+| Its heat (motors, battery) | a thermal camera | warm or cloudy background, long range |
+| The sound of its rotors | microphones | wind, background noise, more than a few hundred metres |
+| What it announces about itself | a Remote ID receiver | the operator chooses not to announce |
+
+A drone can switch off its radio. It cannot stop reflecting radio waves and light, being
+warmer than a clear sky, or making noise. Those four are what the system can always count
+on, and each of them fails in a different situation. That is the reason to use several
+sensors together, and the surveys of the field come to the same conclusion
+[[4]](/projects/three-pixels-in-the-sky/references/)[[5]](/projects/three-pixels-in-the-sky/references/)[[6]](/projects/three-pixels-in-the-sky/references/)[[7]](/projects/three-pixels-in-the-sky/references/)[[8]](/projects/three-pixels-in-the-sky/references/).
+
+In the European Union, drones in the specific category and class-marked drones in the open
+category have had to broadcast a remote identification since 1 January 2024 [[10]](/projects/three-pixels-in-the-sky/references/).
+That broadcast is one more sensor. It removes the drones that play by the rules
+from the list, so the system can spend its effort on the ones that do not. It can also be
+wrong or missing, so it should not be trusted more than the others.
+
+## 1.3 How far each sensor reaches
+
+<Figure src="/media/three-pixels-in-the-sky/reach.png" width={85} alt="Horizontal bars on a logarithmic range axis from 10 m to 3 km. From the literature: radio receiver 2.6 km, radar 1.9 km. Measured on our cameras with a modelled target: camera at 3840 x 2160 295 m, camera without video encoder 234 m, camera at 1920 x 1080 186 m, classifier tells drone from bird at 48 m. Modelled: microphone 88 m with a 40 dB margin and 26 m with 30 dB, two cameras 0.2 m apart give range to 1 m at 15 m.">
+
+The range at which each sensor first detects a small drone. Grey bars are assumptions taken from published figures, the others come from chapters 2, 3 and 5. Only radio and radar reach kilometres. Everything built for this report works within 300 m.
+
+</Figure>
+
+The sensors fall into two groups. A radio receiver and a radar reach kilometres. A camera
+with a wide lens and a microphone reach tens to hundreds of metres. A commercial radio
+sensor is specified for 1 to 1.5 km with a bearing error of 5 degrees [[11]](/projects/three-pixels-in-the-sky/references/), and a
+larger one for 2 km in normal conditions [[12]](/projects/three-pixels-in-the-sky/references/). No radar or radio receiver was available for this project,
+so the two grey bars are assumptions based on such figures. Chapter 4 calculates from
+the physics what both can do.
+
+The short-range sensors are not worse, they do a different job. A camera gives a bearing
+that is more than a hundred times finer than a radio receiver's, and it is the only sensor
+that shows what the object is. A microphone works at night and without a line of sight.
+
+## 1.4 The strategy: four steps
+
+<Figure src="/media/three-pixels-in-the-sky/chain.png" width={100} alt="Four boxes from left to right connected by arrows. Is something there: radio receiver 1 to 2 km, radar several km, daylight camera 127 to 274 m, microphone 26 to 88 m. Roughly where: radio bearing 5 degrees, radar range and 1 to 2 degrees, camera bearing 0.035 degrees without range. What is it: radar blade flashes to about 1.8 km, rotor tones at 533 Hz, how it moves, classifier needs 9 pixels at 48 m. Exactly where: tracker 0.02 degrees with a cue valid for 4 seconds, two cameras 20 m apart, friendly drone. Colours mark whether a number is measured, modelled on my recordings, calculated, or described.">
+
+The four questions a detection system has to answer, with the sensors that answer each one and the number this report found for it. The sensors that were built and measured answer the questions at short range; the first alert at kilometres has to come from a radar or a radio receiver.
+
+</Figure>
+
+The task splits into four questions, each for the sensors that can answer it.
+
+1. **Is something there?** Sensors that watch everything at once raise an alert: the radio
+   receiver, the radar, wide cameras, microphones. At this point a weak signal is enough,
+   as long as false alerts stay rare.
+2. **Roughly where is it?** The alert comes with a direction, and from a radar also with a
+   distance. That gives a sector or a box that can be hundreds of metres across.
+3. **What is it?** A sensor with a narrow view is pointed at the box: a zoom camera by
+   day, a thermal camera by night. It has enough pixels to tell a drone from a bird. The
+   radar helps here too, because turning rotors leave a pattern in the echo that a bird
+   does not have [[13]](/projects/three-pixels-in-the-sky/references/), and the microphone hears the rotor tones at short range.
+4. **Exactly where is it?** All reports go into one tracker that keeps a position, a
+   velocity and an uncertainty for the target [[28]](/projects/three-pixels-in-the-sky/references/). To get a precise position the system needs
+   either a radar range, two sites that see the target from different sides, or a sensor
+   that flies closer.
+
+The steps feed each other. The rough location of step 2 is what makes step 3 possible: a
+zoom camera that can see a small drone at 2 km only sees a window of about 8 degrees, so
+it has to be told where to look. And what the camera sees in step 3 improves the position
+of step 4.
+
+The last step is where a friendly drone comes in. Once the ground sensors have a rough
+position, a drone with its own camera can fly there, confirm what the object is, and
+measure its position from close by. Chapter 6 works out how accurate the ground track has
+to be for that handover.
+
+## 1.5 Which sensors work for which drone
+
+| | Radio receiver | Radar | Camera | Thermal camera | Microphone |
+|---|---|---|---|---|---|
+| Remote-controlled | yes, first alert | yes | by day | by night | close in |
+| Fibre-tethered | no | yes | by day | by night | close in |
+| Autonomous | no | yes | by day | by night | close in |
+
+For the last two kinds the radar is the only long-range sensor left. If it is missing, or
+the drone flies low enough to stay under it, the first alert comes from a camera or a
+microphone at a few hundred metres at most. That is why most of this report is about how far a
+camera and a microphone can be pushed.
+
+## 1.6 Designing it with and without a budget
+
+If cost did not matter, the aim would be that for every kind of drone and every kind of
+weather at least two different sensor types still work. In practice that means several
+radars that look at the same airspace from different sides, radio receivers at several
+sites so that a transmitter can be located, a ring of daylight and thermal cameras with
+zoom cameras behind them, many microphones close to what is being protected, and a few
+drones that can be sent out. Even then the system will not detect every drone every time.
+What it can do is avoid having one situation in which all sensors fail together.
+
+With a budget the question is where to spend it:
+
+- cheap sensors everywhere to raise alerts (radio receivers, microphones, fixed cameras);
+- a few expensive sensors that are only pointed where an alert came from (radar, zoom and
+  thermal cameras);
+- one or two drones to cover the gaps, so that fixed sensors do not have to;
+- protect the site that matters and say clearly which gaps remain.
+
+In that design the difficult part is no longer the hardware. It is deciding how much to
+trust each sensor at a given moment, and where to point the few good sensors next. Chapter
+5 tests the first of these on the measurements of chapters 2 and 3.
+
+## 1.7 What Norway adds
+
+The recordings in this report were made in Brussels on a clear afternoon. In Norway four
+things make the problem harder.
+
+**Darkness.** A daylight camera needs the sun to be higher than about six degrees below
+the horizon. The figure shows, from the position of the sun, how many hours per day that
+is not the case.
+
+<Figure src="/media/three-pixels-in-the-sky/darkness.png" width={100} alt="Hours per day in which the sun is more than six degrees below the horizon, through the year, for five latitudes. In December: Brussels 15 hours, Oslo 16, Trondheim 17, Tromso 20, Longyearbyen 24. In June: Brussels 6 hours, Oslo 2, and zero from Trondheim northwards.">
+
+Hours per day that are too dark for a daylight camera, calculated from the position of the sun for five places. In winter a daylight camera is unusable for most of the day anywhere in Norway, and all day in the far north.
+
+</Figure>
+
+In December a daylight camera is blind for 16 hours a day in Oslo, 17 in Trondheim and 20
+in Tromso. On Svalbard it is blind all day. Over the four months from November to
+February that is 63 % of the time in Oslo, 72 % in Tromso and 93 % in Longyearbyen. In
+June the problem does not exist from Trondheim northwards. A system in northern Norway
+therefore cannot be built around a daylight camera. For a third of the year it has to
+work with heat, radar, radio and sound.
+
+**Weather.** Fog and low cloud are common along the coast. They blind a daylight camera,
+reduce a thermal camera to a few hundred metres, and remove the cold sky behind the drone
+that gives a thermal camera its best contrast (chapter 4). Wind takes away most of the
+range of a microphone (chapter 3). In cloud below freezing, ice forms on anything that
+flies, and this is one of the main limits on the use of unmanned aircraft
+[[39]](/projects/three-pixels-in-the-sky/references/). It applies to an intruding drone and equally to a friendly drone that
+is sent out to look at it (chapter 6).
+
+**Terrain.** Radar and radio need a line of sight. In a landscape of fjords, mountains
+and islands a drone can approach along a valley or low over the water without being
+illuminated. One site on a mast does not cover such terrain, however good the sensor is.
+
+**Distance.** The infrastructure is long and remote: power lines, pipelines, a long
+coast, and platforms at sea, where unidentified drones were reported in 2022
+[[42]](/projects/three-pixels-in-the-sky/references/). It is not possible to place every sensor everywhere. That favours many
+cheap passive sensors that process their data on site, a few expensive ones, and a sensor
+that can move to where it is needed.
+
+| Condition | Daylight camera | Thermal camera | Microphone | Radar | Radio receiver |
+|---|---|---|---|---|---|
+| Polar night | blind | works | works | works | works |
+| Fog, low cloud | blind beyond the visibility | a few hundred metres | works | works | works |
+| Strong wind | works | works | loses most of its range | works | works |
+| Mountains, fjords | line of sight only | line of sight only | hears around obstacles at short range | line of sight only | line of sight, some reflection |
+| A drone that does not transmit | works | works | works | works | hears nothing |
+
+## 1.8 What this report covers
+
+Chapter 2 describes a detector on two real cameras that finds small moving objects in the
+sky, and a classifier that tries to name them. The sky and its false alarms are real. The
+drones are added to the recordings by a model, because no drone could be flown in front
+of the cameras. Chapter 3 analyses a recording of a real Crazyflie made with two phones
+and models how its sound changes with distance. Chapter 4 calculates from the physics
+what a radar, a radio receiver and a thermal camera can do; none of them was available.
+Chapter 5 combines the sensors in a model built on the curves of chapters 2 and 3, and
+tests a tracker on the real aircraft and bird tracks in the recordings. Chapter 6
+describes the last step, a sensor that flies to the target, which was not built.
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

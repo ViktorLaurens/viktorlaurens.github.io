@@ -5,7 +5,7 @@
  */
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
-import { publishedChapters } from '../../lib/chapters';
+import { publishedChapters, isReferences } from '../../lib/chapters';
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, existsSync } from 'node:fs';
@@ -38,7 +38,7 @@ const publicImage = async (path: string): Promise<string | undefined> => {
   return `data:image/png;base64,${png.toString('base64')}`;
 };
 const portrait = `data:image/jpeg;base64,${readFileSync(join(ROOT, 'src', 'assets', 'portrait.jpg')).toString('base64')}`;
-const PHASE_FLOW = '/media/pendulum-lab/phase_flow.webp';
+const PHASE_FLOW = '/media/furuta-pendulum/phase_flow.webp';
 
 const firstPng = (body: string | undefined): string | undefined => body?.match(/src="(\/media\/[^"]+\.png)"/)?.[1];
 const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s);
@@ -63,7 +63,7 @@ export async function getStaticPaths() {
     const project = projects.find((p) => p.id === projectId);
     const num = String(c.data.number).padStart(2, '0');
     const figure = firstPng(c.body);
-    cards.push({ params: { slug: `projects/${projectId}/${chapterSlug}` }, props: { eyebrow: `${project?.data.title ?? projectId} · ${c.data.number < 10 ? `Chapter ${num}` : 'Gallery'}`, title: c.data.title, summary: c.data.summary, image: figure ? await publicImage(figure) : phaseFlow, fit: figure ? 'contain' : 'cover' } });
+    cards.push({ params: { slug: `projects/${projectId}/${chapterSlug}` }, props: { eyebrow: `${project?.data.title ?? projectId} · ${isReferences(c.id) ? 'References' : c.data.number < 10 ? `Chapter ${num}` : 'Gallery'}`, title: c.data.title, summary: c.data.summary, image: figure ? await publicImage(figure) : phaseFlow, fit: figure ? 'contain' : 'cover' } });
   }
   return cards;
 }

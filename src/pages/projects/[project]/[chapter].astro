@@ -1,7 +1,7 @@
 ---
 import { getEntry, render } from 'astro:content';
 import Base from '../../../layouts/Base.astro';
-import { publishedChapters } from '../../../lib/chapters';
+import { publishedChapters, isReferences } from '../../../lib/chapters';
 
 export async function getStaticPaths() {
   const chapters = await publishedChapters();
@@ -28,15 +28,17 @@ const { Content, headings } = await render(entry);
 const toc = headings.filter((h) => h.depth === 2);
 const { number, title, summary } = entry.data;
 const num = String(number).padStart(2, '0');
-// pendulum-lab's gallery is numbered after its chapters; subsea-lab's chapter 10 is a chapter
+// furuta-pendulum's gallery is numbered after its chapters; underwater-manipulation's chapter 10 is a chapter
 const isGallery = slugOf(entry.id) === 'controller-gallery';
-const chapterCount = siblings.filter((c) => slugOf(c.id) !== 'controller-gallery').length;
+const isRefs = isReferences(entry.id);
+const label = (c: typeof entry) => (isReferences(c.id) ? c.data.title : `${String(c.data.number).padStart(2, '0')} · ${c.data.title}`);
+const chapterCount = siblings.filter((c) => slugOf(c.id) !== 'controller-gallery' && !isReferences(c.id)).length;
 ---
-<Base title={`${num} · ${title} · ${project.data.title}`} description={summary}>
+<Base title={`${label(entry)} · ${project.data.title}`} description={summary}>
   <article class="chapter-page container">
     <header class="chapter-head">
-      <p class="eyebrow eyebrow--accent"><a href={`/projects/${projectId}/`}>{project.data.title}</a> · {isGallery ? 'Gallery' : `Chapter ${number} of ${chapterCount}`}</p>
-      <h1><span class="mono chapter-head__num">{num}</span> {title}</h1>
+      <p class="eyebrow eyebrow--accent"><a href={`/projects/${projectId}/`}>{project.data.title}</a> · {isGallery ? 'Gallery' : isRefs ? 'References' : `Chapter ${number} of ${chapterCount}`}</p>
+      <h1>{!isRefs && <span class="mono chapter-head__num">{num}</span>} {title}</h1>
       <p class="lede">{summary}</p>
     </header>
 
@@ -54,7 +56,7 @@ const chapterCount = siblings.filter((c) => slugOf(c.id) !== 'controller-gallery
             {siblings.map((c) => (
               <li>
                 <a href={href(c)} aria-current={c.id === entry.id ? 'page' : undefined}>
-                  <span class="mono">{String(c.data.number).padStart(2, '0')}</span> {c.data.title}
+                  {!isReferences(c.id) && <span class="mono">{String(c.data.number).padStart(2, '0')}</span>} {c.data.title}
                 </a>
               </li>
             ))}
@@ -69,13 +71,13 @@ const chapterCount = siblings.filter((c) => slugOf(c.id) !== 'controller-gallery
           {prev ? (
             <a class="pager__link" href={href(prev)} rel="prev">
               <span class="eyebrow">← Previous</span>
-              <span class="pager__title">{String(prev.data.number).padStart(2, '0')} · {prev.data.title}</span>
+              <span class="pager__title">{label(prev)}</span>
             </a>
           ) : <span />}
           {next ? (
             <a class="pager__link pager__link--next" href={href(next)} rel="next">
               <span class="eyebrow">Next →</span>
-              <span class="pager__title">{String(next.data.number).padStart(2, '0')} · {next.data.title}</span>
+              <span class="pager__title">{label(next)}</span>
             </a>
           ) : (
             <a class="pager__link pager__link--next" href={`/projects/${projectId}/`}>

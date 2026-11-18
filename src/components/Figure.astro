@@ -16,25 +16,45 @@ interface Props {
   poster?: string;
   alt: string;
   width?: number;
+  /** Aspect ratio of a video that is not 16:9, as CSS: "1600 / 700". */
+  ratio?: string;
+  /** A video with sound: shown with a play button and controls, and never started by the page. */
+  controls?: boolean;
 }
-const { src, video, poster, alt, width = 100 } = Astro.props;
+const { src, video, poster, alt, width = 100, ratio, controls } = Astro.props;
 
 let dims: { w: number; h: number } | undefined;
-if (src && src.startsWith('/') && src.endsWith('.png')) {
+if (src && src.startsWith('/') && /\.(png|jpe?g)$/.test(src)) {
   const file = join(process.cwd(), 'public', src);
   if (existsSync(file)) {
     const buf = readFileSync(file);
-    // PNG: 8-byte signature, then IHDR chunk; width and height are big-endian at offsets 16 and 20.
-    if (buf.length > 24 && buf.toString('ascii', 12, 16) === 'IHDR') {
-      dims = { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+    if (src.endsWith('.png')) {
+      // PNG: 8-byte signature, then IHDR chunk; width and height are big-endian at offsets 16 and 20.
+      if (buf.length > 24 && buf.toString('ascii', 12, 16) === 'IHDR') {
+        dims = { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+      }
+    } else {
+      // JPEG: walk the segments to the start-of-frame marker (SOF0 to SOF15, without the
+      // tables DHT, JPG and DAC); height and width are big-endian at offsets 5 and 7 of it.
+      let i = 2;
+      while (i + 9 < buf.length && buf[i] === 0xff) {
+        const marker = buf[i + 1];
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          dims = { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+          break;
+        }
+        i += 2 + buf.readUInt16BE(i + 2);
+      }
     }
   }
 }
 // The report's Manim animations are rendered at 1920×1080.
-const videoRatio = '16 / 9';
+const videoRatio = ratio ?? '16 / 9';
 ---
 <figure class="fig" style={`--w: ${width}%`}>
-  {video ? (
+  {video && controls ? (
+    <video class="fig__media" src={video} poster={poster} controls playsinline preload="none" aria-label={alt} style={`aspect-ratio: ${videoRatio}`}></video>
+  ) : video ? (
     <video class="fig__media" src={video} poster={poster} loop muted playsinline preload={poster ? 'none' : 'metadata'} data-autoplay aria-label={alt} style={`aspect-ratio: ${videoRatio}`}></video>
   ) : (
     <img class="fig__media" src={src} alt={alt} loading="lazy" decoding="async" width={dims?.w} height={dims?.h} />

@@ -1,0 +1,482 @@
+---
+project: three-pixels-in-the-sky
+number: 4
+title: "Radar, radio and heat"
+summary: "The sensors that were not available, from their physics: the radar equation and blade flashes, the link budget and how a drone's radio signal is found and located, and what a thermal camera sees."
+---
+import Figure from '../../../components/Figure.astro';
+
+The camera of chapter 2 reaches a few hundred metres and the microphone of chapter 3 tens
+of metres. The sensors that
+reach kilometres are a radar and a radio receiver, and the sensor that keeps working at
+night is a thermal camera. None of them was available for this project. This chapter explains how each one
+works, starting from the physics, and calculates what it could do against a small drone.
+
+Nothing in this chapter is measured. The formulas are standard and the numbers put into
+them are stated each time, so every result can be recalculated.
+
+## 4.1 Radar: how it measures
+
+A radar sends a radio wave and listens for the part that comes back. It gets three things
+from the echo.
+
+**Range from the delay.** The wave travels to the target and back at the speed of light
+$c$, so an echo that arrives after a time $\tau$ comes from a range
+
+$$
+R = \frac{c \tau}{2}
+$$
+
+Two targets can be told apart in range when their echoes do not overlap. That depends
+only on the bandwidth $B$ of the transmitted signal:
+
+$$
+\Delta R = \frac{c}{2B}
+$$
+
+A bandwidth of $50~\text{MHz}$ gives 3 m. A modern drone radar does not send short pulses.
+It sends a continuous tone whose frequency rises steadily (FMCW), and it measures the
+delay as the frequency difference between what it sends and what it receives. The
+resolution is the same, but the peak power can be a thousand times lower.
+
+**Radial speed from the Doppler shift.** A target that approaches with speed $v$
+shortens the path by $2v$ every second, and the echo comes back at a frequency that is
+higher by
+
+$$
+f_d = \frac{2 v}{\lambda}
+$$
+
+where $\lambda$ is the wavelength. At $9.4~\text{GHz}$ the wavelength is 3.2 cm, and a
+drone at 10 m/s gives a shift of $627~\text{Hz}$. To measure the shift with a resolution
+$\Delta f$ the radar has to look for a time $T = \frac{1}{\Delta f}$. Looking for 20 ms
+separates speeds that differ by 0.8 m/s.
+
+**Direction from the antenna.** An antenna of width $D$ forms a beam of about
+$\frac{\lambda}{D}$ radians. An antenna of 1 m at this wavelength has a beam of 1.8
+degrees, which is 160 m wide at 5 km. Comparing the echo in two overlapping beams
+(monopulse) improves this by about a factor of ten. Many drone radars scan only in
+azimuth, so the height of the target is the weakest of their measurements.
+
+## 4.2 Radar: how far it reaches
+
+The radar equation follows the power step by step [[29]](/projects/three-pixels-in-the-sky/references/). The transmitter
+sends a power $P_t$ through an antenna with gain $G$. At range $R$ this gives a power
+density of $\frac{P_t G}{4 \pi R^2}$. The target takes power out of the wave as if it had
+an area $\sigma$, the radar cross-section, and scatters it in all directions. Back at the
+radar, the density is reduced by another $4 \pi R^2$, and the antenna collects it with an
+effective area $\frac{G \lambda^2}{4 \pi}$. The received power is the product:
+
+$$
+P_r = \frac{P_t G^2 \lambda^2 \sigma}{(4 \pi)^3 R^4}
+$$
+
+The echo competes with the noise of the receiver. If the radar adds up the echo
+coherently over a time $T$, the signal-to-noise ratio is
+
+$$
+\text{SNR} = \frac{P_t G^2 \lambda^2 \sigma T}{(4 \pi)^3 R^4 k T_0 F L}
+$$
+
+where $k T_0$ is $4 \cdot 10^{-21}$ joule, $F$ is the noise figure of the receiver and $L$
+collects the losses. A reliable detection with few false alarms needs a ratio of about 13
+dB. Solving for the range:
+
+$$
+R_{\max} = \left( \frac{P_t G^2 \lambda^2 \sigma T}{(4 \pi)^3 k T_0 F L \cdot \text{SNR}_{\min}} \right)^{\frac{1}{4}}
+$$
+
+Take a small radar: 10 W, an antenna gain of 30 dB, $9.4~\text{GHz}$, 20 ms on the
+target, a noise figure of 5 dB and 6 dB of losses. For a drone with a cross-section of
+0.01 square metre, which is the value measured for small quadcopters
+[[14]](/projects/three-pixels-in-the-sky/references/), the formula gives 5.7 km.
+
+<Figure src="/media/three-pixels-in-the-sky/radar_range.png" width={100} alt="Two panels. Left: detection range against radar cross-section on logarithmic axes for three radars, straight lines with a slope of one quarter; the 10 W radar reaches 3.2 km for a small bird, 5.7 km for a small drone, 18 km for a person and 32 km for a light aircraft. Right: signal-to-noise ratio against range for a drone and a small bird, falling by 12 dB for each doubling of range and crossing the 13 dB detection line at 5.7 km and 3.2 km.">
+
+The radar equation for a small radar. Left: detection range against the size of the target. Right: the signal-to-noise ratio of a drone and of a bird against range. Range falls only slowly with the size of the target, so a radar that sees drones sees birds as well.
+
+</Figure>
+
+The fourth root in this formula explains most of what radar can and cannot do.
+
+- **A small target costs less range than expected.** A drone has a cross-section a
+  thousand times smaller than a light aircraft. The range is only 5.6 times shorter.
+- **More power buys little.** Doubling the range takes 16 times the power.
+- **Sensitivity is not the problem.** The same radar detects a small bird at 3.2 km. A
+  radar that can see drones sees every bird within kilometres, and there are far more
+  birds than drones. In flight, the cross-sections of small drones and of birds overlap,
+  so the strength of the echo cannot separate them [[14]](/projects/three-pixels-in-the-sky/references/).
+
+The real limits are elsewhere. The echo of the ground, of buildings and of the sea is
+millions of times stronger than that of a drone. A radar removes it with the Doppler
+shift, because the ground does not move. But a drone that hovers, or that flies across the
+beam, has no radial speed either, and it disappears together with the ground. The second
+limit is the line of sight. A drone that flies low behind a hill, a building or a ship is
+not illuminated at all.
+
+## 4.3 Radar: telling a drone from a bird
+
+The body of a drone gives one Doppler line. The rotors add something a bird does not
+have [[30]](/projects/three-pixels-in-the-sky/references/)[[13]](/projects/three-pixels-in-the-sky/references/). A blade of length $L$ that turns
+$f_{rot}$ times per second has a tip speed
+
+$$
+v_{tip} = 2 \pi f_{rot} L
+$$
+
+For a blade of 12 cm at 100 turns per second this is 75 m/s. Points along the blade move
+at every speed between zero and $v_{tip}$, towards the radar on one side of the hub and
+away from it on the other. Twice per turn the blade is broadside to the radar, and at that
+moment the whole blade reflects at once. The radar sees a short flash that covers all
+Doppler shifts up to
+
+$$
+f_{d,\max} = \frac{2 v_{tip}}{\lambda} = \frac{4 \pi f_{rot} L}{\lambda}
+$$
+
+which is $4.7~\text{kHz}$ here. A rotor with two blades flashes 200 times per second.
+
+<Figure video="/media/three-pixels-in-the-sky/micro_doppler_rotor.mp4" poster="/media/three-pixels-in-the-sky/micro_doppler_rotor.webp" ratio="1600 / 640" width={100} alt="Left: a two-bladed rotor seen from above with a radar wave arriving from below; the blade half that moves towards the radar is red, the other half blue. Right: Doppler shift against time over 30 ms, with a bright vertical stripe from minus 4.7 to plus 4.7 kHz every 5 ms, each time the blade is broadside to the radar.">
+
+One rotor and the signal it returns, simulated at $9.4~\text{GHz}$. Each blade gives a flash twice per turn. The height of the flash gives the tip speed and the rhythm gives the rotor speed.
+
+</Figure>
+
+A bird has a body line too, and wings that beat a few times per second. Their tips move
+at a few metres per second, which gives a slow wave of a few hundred hertz around the body
+line. The two patterns differ by a factor of ten in width and of thirty in rhythm.
+
+<Figure src="/media/three-pixels-in-the-sky/micro_doppler.png" width={100} alt="Two spectrograms over 120 ms on the same axes. Left, a quadcopter: a bright body line near 0.5 kHz and a band of repeating vertical flashes from minus 4.7 to plus 4.7 kHz around it. Right, a bird: only the body line with a slight slow widening.">
+
+Simulated echo of a quadcopter with four rotors and of a bird, both flying towards the radar at 8 m/s. Rotors spread the echo over kilohertz and wings over a few hundred hertz. This is the feature that separates a drone from a bird.
+
+</Figure>
+
+Three consequences follow from the formulas, and they are not obvious from a datasheet.
+
+- **The radar must be built for it.** To see shifts of $4.7~\text{kHz}$ on both sides
+  without ambiguity it has to sample the echo more than 9 400 times per second. To see
+  the flashes repeat it has to stay on the target for several turns of the rotor, so tens
+  of milliseconds. A radar that scans the horizon quickly cannot do both.
+- **Recognition reaches less far than detection.** The blades are thin and mostly
+  plastic, so their echo is much weaker than that of the body with its battery and
+  motors. If it is 20 dB weaker, the fourth root turns that into a range that is
+  3.2 times shorter: 1.8 km for the radar above, where it detects at 5.7 km. Between those
+  two ranges the radar has a target and cannot say what it is.
+- **A hovering drone is still visible.** Its body line sits at zero and is removed with
+  the ground, but the blade flashes are not at zero. A radar that keeps them can find a
+  drone that stands still.
+
+Two further ideas come from the literature. The polarisation of the echo differs between
+a bird and a drone, which gives a second feature next to the rotor pattern
+[[52]](/projects/three-pixels-in-the-sky/references/). Both features were measured on real birds and a small drone by a British and
+Norwegian team [[62]](/projects/three-pixels-in-the-sky/references/). And a radar does not have to transmit. A passive radar uses the
+signal of an existing television or mobile-network transmitter and listens for its echo
+[[50]](/projects/three-pixels-in-the-sky/references/). It needs no licence to transmit and cannot be found by its own
+signal.
+
+## 4.4 Radio: what a drone transmits
+
+A remotely controlled drone takes part in up to three radio links.
+
+| Link | Sent by | Typical form | What a listener gets |
+|---|---|---|---|
+| Control | the pilot's controller | narrow, hops between frequencies, about $1~\text{MHz}$ wide | that a controller is active, and where the pilot is |
+| Video and telemetry | the drone | wide, 10 to $20~\text{MHz}$, at 2.4 or $5.8~\text{GHz}$ | that a drone is in the air, and its direction |
+| Remote identification | the drone | a short broadcast over Wi-Fi or Bluetooth | the drone's own position, its serial number, often the pilot's position |
+
+The third link is required by law in Europe [[10]](/projects/three-pixels-in-the-sky/references/) and is standardised
+[[35]](/projects/three-pixels-in-the-sky/references/). The largest manufacturer also sends its own version, which has been
+decoded and shown to carry the positions of both the drone and the pilot
+[[31]](/projects/three-pixels-in-the-sky/references/). A receiver that decodes these broadcasts gets a position for free.
+The same study shows the limit: the broadcast can be switched off or falsified by someone
+who wants to. So it sorts the careless from the rest, and nothing more.
+
+## 4.5 Radio: how far a receiver hears
+
+A receiver does not need an echo. The wave travels one way, so the power falls with the
+square of the distance and not with the fourth power. This is the Friis formula
+[[34]](/projects/three-pixels-in-the-sky/references/):
+
+$$
+P_r = P_t G_t G_r \left( \frac{\lambda}{4 \pi d} \right)^2
+$$
+
+Engineers write it in decibels. The loss between two antennas $d$ apart is
+
+$$
+L_{fs} = 20 \log_{10} \frac{4 \pi d}{\lambda}
+$$
+
+which is 100 dB at 1 km for $2.44~\text{GHz}$. A video link that radiates 100 mW (20 dBm)
+then arrives at a receiving antenna with a gain of 8 dB at a level of
+
+$$
+20 - 100 + 8 = {-72}~\text{dBm}
+$$
+
+The noise in the receiver is $kT_0$ per hertz, which is $-174$ dBm, times the bandwidth,
+times its noise figure. For $10~\text{MHz}$ and 6 dB:
+
+$$
+N = -174 + 10 \log_{10} 10^7 + 6 = {-98}~\text{dBm}
+$$
+
+The signal is 26 dB above the noise at 1 km. If the detector needs 10 dB, the link is
+heard out to 6.2 km in free space.
+
+<Figure src="/media/three-pixels-in-the-sky/rf_link.png" width={100} alt="Two panels. Left: signal-to-noise ratio against distance on a logarithmic axis for a 100 mW video link; in free space it crosses the 10 dB line at 6.2 km, near the ground at 2.1 km, in a built-up area at 1.1 km; a narrow control link in free space reaches 19 km. Right: a map of the position error of two receivers 1 km apart that each measure a bearing with 5 degrees error; the error is under 200 m within about 1 km and grows beyond 1 km at 3 km distance.">
+
+Left: how far a receiver hears a drone's video link, for three kinds of terrain. Right: the position error when two receivers each give a bearing of 5 degrees. The terrain decides the range, and two bearings locate well only within about the spacing of the receivers.
+
+</Figure>
+
+Free space is the best case. Near the ground the wave also arrives by reflection, and the
+two paths partly cancel. Measured over longer distances, the power then falls with a
+higher power of the distance than two. With an exponent of 2.7 the range is 2.1 km, and
+with 3.5, which is typical between buildings, 1.1 km. That is the range the commercial
+receivers are specified for [[11]](/projects/three-pixels-in-the-sky/references/)[[12]](/projects/three-pixels-in-the-sky/references/). The formula also
+shows why the narrow control link carries much further than the video link: a tenth of
+the bandwidth lets in a tenth of the noise.
+
+In practice the limit is often not the noise of the receiver. The drone uses the same
+band as every Wi-Fi network, and the detector has to pick out one transmitter among
+hundreds. Two approaches are described in the literature. One recognises the signal by
+its structure, such as its hopping pattern or its frame timing. The other learns the
+small imperfections of each type of transmitter [[33]](/projects/three-pixels-in-the-sky/references/)[[51]](/projects/three-pixels-in-the-sky/references/).
+
+## 4.6 Radio: finding the signal
+
+The link budget says how strong the signal is. Finding it is a second problem, because
+the receiver does not know the frequency, the timing or the format in advance, and the
+band is full of other transmitters.
+
+**What the receiver sees.** A software-defined radio turns a slice of the spectrum into
+a stream of samples. A sampling rate $f_s$ covers a bandwidth of $f_s$. The band at
+$2.4~\text{GHz}$ is $83.5~\text{MHz}$ wide and the one at $5.8~\text{GHz}$ is wider
+still, so a small receiver sees only part of a band at a time and has to step through
+it. Cutting the stream into short pieces and taking the spectrum of each gives a picture
+of power against frequency and time, in which each kind of transmitter has its own
+shape.
+
+<Figure src="/media/three-pixels-in-the-sky/rf_waterfall.png" width={100} alt="Left: a waterfall picture of the 2.4 GHz band over 120 ms. A Wi-Fi network appears as irregular horizontal bars 20 MHz wide on the left, a drone video link as a regular ladder of bars 10 MHz wide near 2457 MHz, a control link as small bright squares at a different frequency every 11 ms, and Bluetooth as faint short dashes all over the band. Right: probability of detection against signal-to-noise ratio for an energy detector with 100, 1000, 10 000 and 100 000 samples, reaching 90 percent at minus 3, minus 8, minus 14 and minus 19 dB.">
+
+Left: how a drone's two links look next to a Wi-Fi network and Bluetooth, drawn schematically. Right: how weak a signal an energy detector can find, for different numbers of samples. A drone is recognised by the pattern of its signal and not by its strength, and averaging more samples reaches signals far below the noise.
+
+</Figure>
+
+**Is there energy?** The simplest detector measures the power in a piece of the picture
+and compares it with the noise. For $N$ samples $x_n$ the measured power is
+
+$$
+T = \frac{1}{N} \sum_{n=1}^{N} | x_n |^2
+$$
+
+Without a signal, $T$ scatters around the noise power $\sigma^2$ with a spread of
+$\frac{\sigma^2}{\sqrt{N}}$. A signal raises the mean by its own power, so it is found
+when its power exceeds a few times that spread. The signal-to-noise ratio that is needed
+therefore falls with the square root of the number of samples. For one false alarm in a
+thousand and nine detections out of ten, it is $-3$ dB for 100 samples and $-14$ dB for
+10 000. This has a limit. The detector has to know the noise power, and when that is
+uncertain by even a fraction of a decibel, no amount of averaging finds a signal below
+that uncertainty [[65]](/projects/three-pixels-in-the-sky/references/).
+
+**Is it a drone?** Energy alone does not say what transmits. The shape does.
+
+- **A control link hops.** It sends a short burst, about $1~\text{MHz}$ wide, and moves
+  to another frequency for the next one, in a pattern that looks random. The time
+  between hops and the length of a burst are fixed for a given make of controller.
+- **A video link is wide and regular.** It fills 10 to $20~\text{MHz}$ and repeats with
+  the rhythm of its frames. A Wi-Fi network has the same width, but it sends when there
+  is data and stays quiet in between.
+- **Bluetooth hops too**, but 1 600 times per second and with very short bursts.
+
+A classifier can work on these measured properties, or directly on the picture
+[[33]](/projects/three-pixels-in-the-sky/references/)[[51]](/projects/three-pixels-in-the-sky/references/).
+
+**Using what is known about the signal.** Most video links use the same modulation as
+Wi-Fi and mobile phones (OFDM). Every symbol of such a signal starts with a copy of its
+own last part. If the received signal $x$ is multiplied with a copy of itself that is
+delayed by one symbol length $T_u$, the copies line up and add, while noise does not:
+
+$$
+R(T_u) = \frac{1}{N} \sum_{n} x_n \overline{x_{n + T_u}}
+$$
+
+This finds the signal below the noise, and the delay at which it peaks gives the symbol
+length, which tells one family of links from another. Many links also begin every frame
+with a fixed sequence. A receiver that knows the sequence correlates against it and gains
+a factor equal to its length. This is how the broadcast of the largest manufacturer was
+found and decoded [[31]](/projects/three-pixels-in-the-sky/references/).
+
+**Reading the identification.** The remote identification of section 4.4 is sent as
+ordinary Wi-Fi or Bluetooth messages [[35]](/projects/three-pixels-in-the-sky/references/). A receiver chip that costs a few euros
+reads them, so this layer of a detection system can be placed in large numbers.
+
+**Drone or pilot.** The video link comes from the drone and the control link from the
+pilot on the ground. A receiver that separates the two gets two bearings, one in the air
+and one on the ground, and the second is often the more useful one.
+
+**What makes it hard.** A hopping link is only caught when the receiver happens to look
+at the right part of the band, so a narrow receiver misses most bursts. A drone that
+flies over the mobile network looks like a telephone. And everything in this section
+needs the drone to transmit.
+
+## 4.7 Radio: from a signal to a position
+
+**A bearing from the phase.** Two antennas a distance $a$ apart receive the same wave
+with a phase difference that depends on the direction $\theta$ it comes from:
+
+$$
+\Delta \varphi = \frac{2 \pi a \sin \theta}{\lambda}
+$$
+
+Noise disturbs the measured phase by about $\frac{1}{\sqrt{\text{SNR}}}$ radians, so the
+bearing has an error of
+
+$$
+\sigma_\theta = \frac{\lambda}{2 \pi a \cos \theta \sqrt{\text{SNR}}}
+$$
+
+With the antennas half a wavelength apart (6 cm) and a ratio of 10 dB this is 5.8
+degrees, which is what the datasheets state. Moving the antennas to four wavelengths
+apart gives 0.7 degrees, but then several directions give the same phase. Practical
+direction finders therefore combine several spacings, or use an array with an algorithm
+such as MUSIC [[32]](/projects/three-pixels-in-the-sky/references/). The error grows towards the ends of the array,
+where $\cos \theta$ goes to zero, and reflections from buildings add errors that no
+amount of signal removes.
+
+**A position from two bearings.** Two receivers each give a line, and the drone is where
+the lines cross. The right panel of the figure above shows how good that crossing is for
+receivers 1 km apart. At 1 km in front of them the error is 170 m. At 2 km it is 540 m
+and at 3 km 1.2 km, because the lines become almost parallel. A pair of receivers locates
+well only within about its own spacing.
+
+**A position from arrival times.** Three or more receivers with a common clock compare
+when the same signal arrives. Each time difference $\Delta t$ places the drone on a
+hyperbola, and an error in time becomes an error in distance of
+
+$$
+\sigma_d = c \sigma_t
+$$
+
+Ten nanoseconds is 3 m. This is far better than bearings at long range, and it improves
+with the bandwidth of the signal, which favours the wide video link. The cost is that the
+receivers need clocks that agree to nanoseconds, usually from satellite navigation, and a
+data link between them.
+
+**What a radio receiver cannot do.** It hears nothing from a drone that does not
+transmit. A drone on a programmed route is silent, and so is one that is steered through
+an optical fibre [[9]](/projects/three-pixels-in-the-sky/references/).
+
+## 4.8 Heat: what a thermal camera sees
+
+Every object radiates because it is warm. Planck's law gives the radiance at each
+wavelength for a temperature $T$:
+
+$$
+B_\lambda(T) = \frac{2 h c^2}{\lambda^5} \cdot \frac{1}{e^{\frac{h c}{\lambda k T}} - 1}
+$$
+
+The peak lies at a wavelength of $\frac{2898}{T}$ micrometre. For the sun at 5 800 K that
+is 0.5 micrometre, which is why eyes and ordinary cameras work there. For an object at
+300 K it is 9.7 micrometre. A thermal camera for the band from 8 to 14 micrometre (long
+wave infrared, LWIR) therefore sees objects by their own radiation and needs no light.
+
+<Figure src="/media/three-pixels-in-the-sky/thermal.png" width={100} alt="Two panels. Left: Planck curves against wavelength from 0 to 16 micrometre for a warm drone part at 310 K, air at 283 K and a clear sky at 233 K, with the visible, mid-wave and long-wave bands shaded; the warm curves peak near 10 micrometre inside the long-wave band. Right: apparent temperature difference in one pixel against range on a logarithmic axis for four cases, falling below the detection line of 0.25 K at 1.8 km for a patch 10 K warmer in clear air, 3.5 km for 50 K against a clear sky, 1.4 km in haze and 0.4 km in fog.">
+
+Left: thermal radiation of a warm part, of the air and of a clear sky. Right: a model of how the signal of a small warm patch falls with range. Once the patch is smaller than a pixel its signal falls with the square of the range. Fog limits a thermal camera, and darkness does not.
+
+</Figure>
+
+**The signal is a small difference.** At 300 K, one kelvin changes the radiance in the
+LWIR band by 1.5 %. An uncooled thermal camera resolves about 0.05 K, so it is a sensitive
+instrument, but what it measures is contrast with the background and not temperature.
+
+**What the contrast of a drone is.** The motors, the speed controllers and the battery of
+a flying drone are warmer than the air. The plastic shell around them is close to air
+temperature. The background matters as much as the drone. A clear sky overhead radiates
+very little in this band and looks tens of degrees colder than the air. Towards the
+horizon the camera looks through much more air, and the sky there looks almost as warm
+as the air itself. Low cloud does too. So a drone high in a clear sky stands out even
+when it is cold, and a drone low over the horizon or under cloud stands out only through
+its warm parts. A drone that approaches a site does so at a low angle. Birds are warm as
+well, so heat alone does not separate the two [[40]](/projects/three-pixels-in-the-sky/references/).
+
+**A thermal camera has few pixels.** A typical uncooled sensor has 640 by 512 pixels of
+12 micrometre. With a lens of 35 mm one pixel covers 0.34 milliradian and the whole image
+12.6 degrees. A 0.30 m drone at 300 m is 2.9 pixels wide. The daylight camera of chapter 2 covers 67
+degrees with pixels of 0.69 milliradian. Per pixel the thermal camera is twice as sharp,
+but it would take five of them to watch the same part of the sky.
+
+The pixels cannot simply be made smaller. Diffraction blurs a point to an angle of
+
+$$
+\theta = 1.22 \frac{\lambda}{D}
+$$
+
+for a lens opening $D$. The wavelength is twenty times longer than for visible light. For
+the 35 mm lens above the blur is 0.35 milliradian, the size of one pixel. A sharper
+thermal image needs a larger lens, and these lenses are made of germanium because glass
+does not let this radiation through.
+
+**How far it reaches.** Beyond about 350 m the warm parts of the drone are smaller than
+one pixel. The pixel then averages the patch, of area $A$, with the background around it,
+and the air absorbs part of the radiation on the way. The temperature difference the
+camera sees is
+
+$$
+\Delta T_{app} = \Delta T \cdot \frac{A}{(\theta_{px} R)^2} \cdot e^{-\beta R}
+$$
+
+where $\theta_{px}$ is the angle of one pixel and $\beta$ the extinction of the air. The
+table below requires five times the noise of the camera, 0.25 K, for a warm patch of 12 cm.
+
+| Case | Assumed | Range |
+|---|---|---|
+| Warm parts against a background at air temperature, clear air | 10 K difference | 1.8 km |
+| Drone against a clear sky overhead | 50 K difference | 3.5 km |
+| Haze, visibility 2 km | 10 K, three times the extinction | 1.4 km |
+| Fog, visibility 200 m | 10 K, forty times the extinction | 0.4 km |
+
+These ranges are upper limits. The model only contains the noise of the camera. In a real
+image the edges of clouds and the horizon produce far more false candidates than that
+noise, as chapter 2 showed for the daylight camera. A study with real drones found that a
+thermal camera detected them as well as a daylight camera of higher resolution, at ranges
+of a few hundred metres [[15]](/projects/three-pixels-in-the-sky/references/).
+
+**Fog.** The visibility $V$ that a weather report gives is tied to the extinction for
+visible light by $V = \frac{3.9}{\beta}$ [[45]](/projects/three-pixels-in-the-sky/references/). In haze the particles are
+much smaller than 10 micrometre, and the long wave passes them almost undisturbed. In
+dense fog the droplets are about as large as the wavelength, and most of the advantage is
+lost. The table assumes that the thermal camera suffers 40 % of the extinction that
+visible light does in fog. A thermal camera sees through darkness completely and through
+haze well, and through thick fog only a little better than the eye.
+
+## 4.9 Other sensors
+
+| Sensor | What it adds | Why it is not a first choice |
+|---|---|---|
+| Laser rangefinder or lidar | range to centimetres, which is the dimension a camera lacks | the beam is narrow, so it has to be pointed by another sensor first |
+| Cooled mid-wave infrared camera | twice the contrast per kelvin and sharper optics than LWIR | cost, and a cooler that wears out |
+| Short-wave infrared camera | sees through haze better than a daylight camera | needs light, like a daylight camera |
+| Receiver for aircraft transponders (ADS-B) | removes the aircraft from the list of unknown objects | drones do not carry these transponders |
+
+## 4.10 What each sensor contributes
+
+| | Radar | Radio receiver | Thermal camera | Daylight camera (chapter 2) | Microphone (chapter 3) |
+|---|---|---|---|---|---|
+| Works against a silent drone | yes | no | yes | yes | yes |
+| Range for a small drone | kilometres | 1 to 2 km near the ground | hundreds of metres to 1 to 2 km | 130 to 300 m with the camera of chapter 2 | tens of metres for a Crazyflie |
+| Gives direction | 1 to 2 degrees | about 5 degrees | a fraction of a pixel | a fraction of a pixel | tens of degrees |
+| Gives range | yes, to metres | only with several sites | no | no | no |
+| Tells drone from bird | by the rotor pattern, at shorter range | yes, a bird does not transmit | hardly | with enough pixels | by the rotor tones |
+| Fails when | no line of sight, hovering target, many birds | the drone does not transmit | thick fog, low over a warm background | night, fog, haze | wind, rain, background noise |
+| Reveals itself | yes | no | no | no | no |
+
+No column has a yes in every row. The two long-range sensors fail in opposite cases: the
+radio receiver against a silent drone, the radar against a drone behind terrain. The
+cameras give the direction that both of them lack, and the radar gives the range that the
+cameras lack. Chapter 5 puts numbers on how these reports are combined.
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

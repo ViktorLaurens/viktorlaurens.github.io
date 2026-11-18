@@ -5,16 +5,17 @@
 // Figures become <Figure>, GIFs become looping MP4s, links into the (private)
 // repository are flattened to plain text, and the live demos are inserted at
 // fixed anchors. Media must be copied separately:
-//   cp docs/media/*.png docs/media/*.mp4 public/media/pendulum-lab/
+//   cp docs/media/*.png docs/media/*.mp4 public/media/furuta-pendulum/
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = process.argv[2] ?? 'C:/Users/vikto/dev/personal/pendulum-lab/docs';
-const OUT = join(HERE, '..', 'src', 'content', 'chapters', 'pendulum-lab');
-const BASE = '/projects/pendulum-lab';
-const MEDIA = '/media/pendulum-lab';
+// By default the report repository is expected next to this one.
+const SRC = process.argv[2] ?? join(HERE, '..', '..', 'pendulum-lab', 'docs');
+const OUT = join(HERE, '..', 'src', 'content', 'chapters', 'furuta-pendulum');
+const BASE = '/projects/furuta-pendulum';
+const MEDIA = '/media/furuta-pendulum';
 
 const chapters = [
   { file: '01_simple_pendulum.md', slug: '01-simple-pendulum', summary: 'The forward problem: equation of motion, the small-angle approximation and where it breaks, state space, fixed points and the phase flow.' },
@@ -114,7 +115,7 @@ for (const ch of chapters) {
   if (/\]\((README|gallery|\d\d_)/.test(md)) warnings.push(`${ch.file}: leftover report link`);
 
   const imports = ["import Figure from '../../../components/Figure.astro';", ...extraImports].join('\n');
-  const fm = `---\nproject: pendulum-lab\nnumber: ${number}\ntitle: "${title.replace(/"/g, '\\"')}"\nsummary: "${ch.summary.replace(/"/g, '\\"')}"\n---\n${imports}\n\n`;
+  const fm = `---\nproject: furuta-pendulum\nnumber: ${number}\ntitle: "${title.replace(/"/g, '\\"')}"\nsummary: "${ch.summary.replace(/"/g, '\\"')}"\n---\n${imports}\n\n`;
   writeFileSync(join(OUT, `${ch.slug}.mdx`), fm + md.trimEnd() + '\n');
   console.log(`${String(number).padStart(2, '0')} ${ch.slug}: ${md.length} chars, ${(md.match(/<Figure/g) || []).length} figures${extraImports.length ? `, ${extraImports.length} demo` : ''}`);
 }

@@ -1,0 +1,312 @@
+---
+project: three-pixels-in-the-sky
+number: 3
+title: "Hearing a small drone"
+summary: "A Crazyflie recorded with two phones: its comb of rotor tones, a model of sound over distance, how far a detector would hear it, a bearing from two microphones, and what a dish or an array would add."
+---
+import Figure from '../../../components/Figure.astro';
+
+A camera needs light and a free line of sight. A microphone needs neither, and a small
+drone makes quite a lot of noise. This chapter analyses a recording of a Crazyflie made
+with two phones, describes what the drone sounds like, and estimates from how far a
+microphone could still hear it.
+
+The sound of the drone is measured. How loud it is could not be measured with phones, so
+the range comes from a model of how sound gets weaker with distance, for a range of
+assumptions. Section 3.9 lists what is still open.
+
+## 3.1 The recording
+
+Two phones on the floor of a living room, about 2 m apart, recorded for 100 seconds. The recording contains a clap, some silence, the Crazyflie hovering about 1 m
+away for 25 seconds, then the same drone at about 3 m and 5 m, a crash, and a second clap.
+
+Only the hover at 1 m is steady. Further away the drone flew over the edge of a low table
+and then over furniture. The height controller had to work hard there, and in the end the
+drone landed on the floor.
+
+<Figure src="/media/three-pixels-in-the-sky/crazyflie.jpg" width={70} alt="A small quadcopter seen from above on a white table: a black cross-shaped circuit board with a motor at each end, four green two-bladed propellers with black guards around them, and a battery under a small board in the centre.">
+
+The Crazyflie that was recorded: four motors with two-bladed propellers of 55 mm, and guards around them. Two blades per rotor is what turns a rotor speed of 267 turns per second into a tone near $533~\text{Hz}$.
+
+</Figure>
+
+One phone saved an uncompressed file and the other a compressed one, both at 48 000
+samples per second. The first clap lines up the two files: the left phone had
+started 8.48 seconds before the right one.
+
+<Figure src="/media/three-pixels-in-the-sky/crazyflie_sound.png" width={70} alt="Three panels. Top: spectrogram of the left phone's recording up to 8 kHz, with a clap at 13 s, a voice at 24 s, a steady band of horizontal lines from 33 to 58 s (hover at 1 m), the same lines wobbling from 60 to 92 s (farther away), a crash, and a clap at 103 s. Middle: level over time for both phones, about 45 dB above the room during the flight and nearly the same at 1 m and farther away. Bottom: spectrum of the hover at 1 m with narrow peaks near 530 Hz and its multiples, the spectrum farther away, and the room without the drone far below both.">
+
+The Crazyflie as the left phone recorded it: over time, in level, and in frequency. A drone sounds like a comb of narrow tones. A detector should look for that comb and not for loudness.
+
+</Figure>
+
+## 3.2 What a Crazyflie sounds like
+
+The hover sounds like a set of narrow tones on top of a broad hiss. The strongest tone is
+at $533~\text{Hz}$ (between 516 and $545~\text{Hz}$ during most of the hover), and tones
+near its multiples can be followed up to 6 kHz. This is what rotors produce. Each of the four
+motors turns two blades, the blades pass about 530 times per second, and the four motors
+never run at exactly the same speed. Every multiple is therefore a small group of lines.
+
+A rotor with $n_b$ blades that turns $f_{rot}$ times per second produces a tone at
+
+$$
+f_{bp} = n_b f_{rot}
+$$
+
+With two blades, $533~\text{Hz}$ means 267 turns per second, or 16 000 per minute. The
+propellers of this Crazyflie are 55 mm across, so the blade tips move at
+$2 \pi \cdot 267 \cdot 0.0275 = 46$ m/s. This is the quantity a radar uses to recognise a
+drone (chapter 4). At $9.4~\text{GHz}$ these tips would give Doppler shifts up to
+$2.9~\text{kHz}$. The microphone and the radar measure the same rotation in two ways.
+
+The tones do not stay in one place. While the drone was struggling to keep its height, the
+strongest tone moved between 439 and $574~\text{Hz}$ and the level changed by 7 dB
+(against 2 dB during the steady hover). A detector that waits for one fixed frequency
+would miss a drone that is manoeuvring. It has to look for the whole pattern of tones,
+wherever that pattern sits.
+
+## 3.3 What the phones did to the level
+
+In open air a sound source is 9.5 dB weaker at 3 m than at 1 m, and 14 dB weaker at 5 m.
+In the recording the part at 3 to 5 m is within 1 dB of the hover at 1 m, on both phones.
+The room adds echoes, but not that much.
+
+The explanation is that the phones adjust their own gain. After each clap the level of
+the silence drops and then slowly comes back. The two phones also disagree by 18 dB about
+how quiet the same room is: the hover is 57 dB above the room on one phone and 39 dB on
+the other.
+
+So these recordings show what the sound looks like, but not how strong it is. They
+cannot be used to check how the level drops with distance, or to read off how far the
+drone is above the background. That takes a recording app that switches off the phone's
+processing, or a measurement microphone.
+
+## 3.4 How sound changes with distance
+
+Three things change a sound on its way to a microphone that is far away. With a model
+of these, the hover at 1 m can be turned into the same drone at any distance.
+
+The level drops because the wave spreads out, and because the air absorbs part of it:
+
+$$
+L(r) = L(1~\text{m}) - 20 \log_{10} r - \alpha(f) (r - 1)
+$$
+
+with $r$ in metres. The absorption $\alpha$ increases strongly with frequency [[20]](/projects/three-pixels-in-the-sky/references/).
+At 10 degrees and 70 % humidity it is 3.7 dB per kilometre at 1 kHz and 33 dB per kilometre
+at 4 kHz. A distant drone is therefore not only quieter, it also sounds duller.
+
+The sound that arrives now left the drone a moment earlier, because it needs time to
+travel. When the distance changes, this delay changes, and that causes the Doppler shift.
+A tone of frequency $f$ from a drone that approaches at speed $v$ is heard at
+
+$$
+f' = \frac{f}{1 - \frac{v}{c}}
+$$
+
+where $c$ is the speed of sound, about 343 m/s. The model applies the changing delay
+directly, and the shift follows from it.
+
+A pure tone that passes at 10 m/s checks the model against these formulas. The
+received frequency agrees to within $0.6~\text{Hz}$ and the level to within 0.1 dB at four
+ranges between 26 and 129 m. With the recorded hover as the source, the band from 4 to
+8 kHz arrives 8 dB weaker than the band from 400 to $1000~\text{Hz}$ at 131 m. That is the
+effect of the absorption.
+
+<Figure video="/media/three-pixels-in-the-sky/passby.mp4" poster="/media/three-pixels-in-the-sky/passby.webp" ratio="1600 / 700" width={100} alt="Left: a drone moving on a straight line past a microphone at 25 m, with the distance, the closing speed and the frequency heard. Right: the six rotor tones against time over 30 seconds; each tone is about 3 percent higher while the drone approaches, slides down as it passes at 15 seconds, and stays 3 percent lower afterwards.">
+
+The model of this section for a drone that passes a microphone at 25 m: where it is, and the pitch and level of its six rotor tones. The pitch drops by 6 % in the few seconds around the closest point, and the level changes by 16 dB over the pass. Both tell a moving source from a fixed one.
+
+</Figure>
+
+<Figure src="/media/three-pixels-in-the-sky/flyby_crazyflie.png" width={70} alt="Three panels over 20 seconds. Top: spectrogram of the simulated pass; the rotor tones are faint at the start, brightest near 15 s, and slide down in frequency as the drone passes. Middle: simulated level rising from 47 dB below the 1 m recording at 130 m to 28 dB below at 25 m, a little under the curve for spreading alone at long range. Bottom: bearing estimated from two microphones 3 m apart, close to the true bearing when the noise is 20 dB below the pass and scattered when the noise is as loud as the pass.">
+
+The recorded hover carried past two microphones at 10 m/s by the model, from 150 m away to 25 m and beyond. The hover lasts 18 seconds and is repeated once. Far away the high tones disappear first, and a bearing from two microphones needs the drone to be 20 dB above the noise.
+
+</Figure>
+
+## 3.5 How far the rotor tones carry
+
+The detector follows from section 3.2. Once per second it computes the spectrum and
+measures how far each frequency stands above its smoothed surroundings. It then adds these
+values along a comb: a fundamental between 400 and $700~\text{Hz}$ and its multiples up to
+6 kHz. It does this for every possible fundamental and keeps the largest sum as the score.
+The threshold is set on noise alone, at one false alarm per 1000 seconds.
+
+In formulas: let $X(f)$ be the spectrum of one second of sound and $e(f)$ the number of
+decibels by which it stands above its own median over the neighbouring $100~\text{Hz}$. The score
+for a fundamental $f_0$ is the mean of that excess at its multiples, and the detector
+takes the best fundamental:
+
+$$
+C = \max_{f_0} \frac{1}{K} \sum_{k=1}^{K} e(k f_0), \qquad K = \left\lfloor \frac{6000}{f_0} \right\rfloor
+$$
+
+Dividing by the local median makes the score independent of how loud the recording is
+and of the slope of the background spectrum. It is the same idea as the local noise level
+in the camera detector of section 2.3. Averaging over about ten multiples is what lets
+the detector find tones that are each too weak to stand out on their own.
+
+The drone in this test is the recorded hover, weakened by the model. The background is
+pink noise, which has a falling spectrum similar to wind and distant traffic. One number
+is missing: how far the drone at 1 m is above the background, in the band from 300 to
+$8000~\text{Hz}$. This is the margin. The phones cannot give it (section 3.3), so the
+range is given for several margins.
+
+<Figure src="/media/three-pixels-in-the-sky/hearing_range.png" width={100} alt="Fraction of seconds in which the rotor-tone detector fires, against range on a logarithmic axis from 1 to 240 m, for five margins. With 20 dB the curve falls through one half near 9 m, with 30 dB near 26 m, with 40 dB near 88 m, with 50 dB at 240 m; with 60 dB it stays at 1.">
+
+The rotor-tone detector against range, for five values of the drone's level above the background at 1 m. Each point is based on 18 one-second decisions. The range depends entirely on how loud the drone is compared with the background. Every 10 dB triples it.
+
+</Figure>
+
+| Margin at 1 m | Heard out to |
+|---|---|
+| 20 dB | 9 m |
+| 30 dB | 26 m |
+| 40 dB | 88 m |
+| 50 dB | 240 m |
+
+The table gives the range at which the detector still fires in half of the seconds. Every
+10 dB of margin roughly triples it, which is what the spreading law predicts.
+In the quiet room the right phone put the Crazyflie 39 dB above the background. That
+number cannot be trusted (section 3.3), and outdoors the background is higher anyway.
+On the other hand a Crazyflie weighs a few tens of grams, and a drone that carries a camera is
+much louder.
+
+For comparison, outdoor studies with larger drones report detection ranges of about 100 to
+200 m, and up to 300 to 500 m when the detector is trained for long distances [[22]](/projects/three-pixels-in-the-sky/references/).
+The microphone hardware matters as much as the processing [[23]](/projects/three-pixels-in-the-sky/references/). A Crazyflie is much
+smaller than the drones in those studies.
+
+So a microphone hears a drone of this size at tens of metres, and
+larger drones at a few hundred metres at most. But it does so in fog and at night, when the
+camera of chapter 2 sees nothing.
+
+## 3.6 Two phones as a pair
+
+
+A sound reaches the nearer phone first. With the phones 2 m apart the difference is at
+most 5.8 milliseconds, and it gives the direction of the source. This time
+difference is estimated with the generalised cross-correlation method [[21]](/projects/three-pixels-in-the-sky/references/). With $X_1$ and $X_2$ the spectra of
+the two microphones, it finds the delay $\tau$ at which they agree best, after dividing
+out the magnitude at every frequency so that all frequencies count equally:
+
+$$
+\hat{\tau} = \arg\max_{\tau} \int \frac{X_1(f) \overline{X_2(f)}}{| X_1(f) \overline{X_2(f)} |} e^{2 \pi i f \tau} df
+$$
+
+For microphones a distance $a$ apart, the delay gives the bearing $\theta$ from
+$\sin \theta = \frac{c \tau}{a}$, and an error $\sigma_\tau$ in the delay becomes an error
+in bearing of
+
+$$
+\sigma_\theta = \frac{c \sigma_\tau}{a \cos \theta}
+$$
+
+This has the same form as the phase method of a radio receiver in section 4.7. Sound is
+a million times slower than radio, so two phones 2 m apart can do with a timing of a
+tenth of a millisecond what radio antennas have to do with a few picoseconds. In the model, with a pair
+3 m apart, the bearing is correct to within a few degrees when the noise is 20 dB below
+the drone. It fails when the noise is as loud as the drone (see the figure in section
+3.4).
+
+In the real recordings the time difference during the hover is steady at 18.4
+milliseconds. That is three times more than the geometry allows, so the two files are not
+lined up well enough. The clap lines them up only roughly: the two phones have
+separate clocks, and the clap itself reached them at different times.
+
+The change can still be read off. When the drone left its hover the time difference
+moved by 2.9 milliseconds. That is one metre of extra path to one of the phones, and for
+phones 2 m apart it means the direction changed by about 30 degrees. For an absolute
+bearing both microphones need to be on the same clock, so one recorder with two inputs.
+
+## 3.7 Ears with a shape
+
+Owls and bats do not hear with bare eardrums. The outer ear collects sound from one
+direction and shades it from others. Before radar, aircraft were found in the same way,
+with large horns and concrete sound mirrors. Two questions decide whether this helps
+against a drone: how much a shaped ear gains, and at which frequencies.
+
+**A dish.** A parabolic dish of diameter $D$ concentrates sound of wavelength $\lambda$
+on a microphone in its focus. Its gain and the width of its beam are approximately
+
+$$
+G = \eta \left( \frac{\pi D}{\lambda} \right)^2, \qquad \theta \approx 70 \frac{\lambda}{D} \text{ degrees}
+$$
+
+with an efficiency $\eta$ of about one half. These are the same formulas as for a radar
+antenna in chapter 4. Sound waves are long, and that limits what a dish can do:
+
+| Tone | Wavelength | Gain of a 0.5 m dish | Beam width |
+|---|---|---|---|
+| $533~\text{Hz}$, the fundamental | 64 cm | 5 dB | 90 degrees |
+| $2~\text{kHz}$ | 17 cm | 16 dB | 24 degrees |
+| $4~\text{kHz}$ | 8.6 cm | 22 dB | 12 degrees |
+
+At the fundamental the dish is smaller than the wavelength and does almost nothing. At
+the higher rotor tones it gains 16 to 22 dB. By the result of section 3.5, where every
+10 dB of margin triples the range, that would multiply the range several times. But these
+are the tones that the air absorbs first (section 3.4): at 500 m the tone at 4 kHz has
+lost 16 dB to absorption alone. A dish therefore helps most at a few hundred metres, and
+it gives a direction to within its beam width.
+
+**An array.** A dish has to be pointed, so it has the same problem as a zoom camera: it
+needs to be told where to listen. An array of $N$ microphones does not. Adding their
+signals with the right delays forms the same kind of beam in software, in every direction
+at once, and gains $10 \log_{10} N$ decibels against noise that differs between the
+microphones: 12 dB for 16 microphones and 18 dB for 64. The beam width follows from the
+size of the array as it does for a dish, and the microphones have to be closer together
+than half a wavelength, which is 4.3 cm at 4 kHz. The outdoor studies cited in section
+3.5 use such arrays.
+
+**What the animals add.** The ears of a barn owl sit at different heights and point in
+different directions. A sound from above is louder in one ear and a sound from below in
+the other, which gives the owl the elevation of a source with only two ears
+[[64]](/projects/three-pixels-in-the-sky/references/). Two microphones in shaped, asymmetric shells could do the same.
+This is cheaper than an array, and it works best at the high frequencies where the shells
+are large compared with the wavelength.
+
+For a system that has to find a drone at any bearing, an array is the better first
+choice. A dish, or a pair of shaped ears on a pan-tilt mount, makes sense as a second
+stage that listens along a bearing another sensor has given.
+
+## 3.8 A sound track for the approach
+
+The approach video of chapter 2 shows three drones flying in from about 370 m. Each of
+them gets the recorded hover as its sound, carried along its own flight by the model.
+The background is pink noise, 40 dB below the drone at 1 m. That value is an assumption,
+as explained above.
+
+Far away the hiss is buried in the noise and only the two or three strongest tones are
+visible. The full comb appears in the last hundred metres. When a drone is 340 m away its
+sound arrives about one second after the picture.
+
+<Figure src="/media/three-pixels-in-the-sky/approach_sound.png" width={70} alt="Top: spectrogram of the sound track over 43 seconds; a few faint horizontal tones from the start, then the full comb of rotor tones growing and bending downward in frequency as two drones pass near 30 s. Bottom: range of the three drones over time, from about 380 m down to 24 m, 25 m and 72 m.">
+
+The approach of chapter 2 with sound. The sound arrives later and weaker than the image. At the range where the camera first detects the drone, the microphone hears nothing yet.
+
+</Figure>
+
+<Figure video="/media/three-pixels-in-the-sky/approach.mp4" poster="/media/three-pixels-in-the-sky/approach.webp" controls width={100} alt="The sky recording with three small drones drawn in, each marked by a circle, and a green box where the detector has confirmed one">
+
+The same approach with its sound track: the recorded hover, carried along each flight by the model. The tones stay faint until the last hundred metres. Press play to hear it.
+
+</Figure>
+
+## 3.9 Limits
+
+- **No level.** The phones adjust their gain, so neither the loudness of the drone nor
+  the background was measured. The ranges in section 3.5 are for assumed margins.
+- **One drone, one steady hover of 18 seconds, indoors.** The echoes of the room are part
+  of the recording. A drone in forward flight sounds different from a hovering one.
+- **The background is pink noise.** Real backgrounds contain tones of their own (engines,
+  birds, wind in cables) that a comb detector can confuse with rotors. A real
+  outdoor background was not recorded.
+- **The model leaves out** the reflection from the ground, wind, temperature layers, and
+  the fact that a drone sounds different in different directions. Over a few hundred
+  metres these change the level by several dB in either direction.
+- **No bearing from the real recordings**, only a change of bearing, because the phones
+  do not share a clock.
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

@@ -1,7 +1,7 @@
 /**
  * Live damped pendulum with swing-up and balance control, plus its phase portrait.
  *
- * Model (same as Pendulum Lab, chapter 1), angle θ measured from the hanging position:
+ * Model (same as The Furuta Pendulum, chapter 1), angle θ measured from the hanging position:
  *   θ̈ = −ω₀² sin θ − μ θ̇ + u
  * Integrated with fixed-step RK4. The controller pumps energy until it has enough to
  * reach the top, then hands over to a linear state feedback that holds it upright.

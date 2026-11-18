@@ -1,0 +1,181 @@
+---
+title: "Three Pixels in the Sky"
+summary: "At 145 m a 0.30 m drone covers three pixels of a camera image. What two cameras on a Jetson and two phones as microphones detect on a real sky and from how far, what radar, radio and thermal imaging add according to their physics, and how reports from sensors that each fail in some weather become one position with an uncertainty."
+date: 2026-11-18
+tags: [perception, estimation, detection, sensor fusion, learning]
+featured: true
+order: 2
+report: /media/three-pixels-in-the-sky/cuas-lab-report.pdf
+coverVideo: /media/three-pixels-in-the-sky/showcase/hero.mp4
+coverPoster: /media/three-pixels-in-the-sky/showcase/cards/hero.webp
+coverAlt: "A recorded sky above trees with two birds a few pixels wide, each followed by a green box that draws its path"
+heroVideo: /media/three-pixels-in-the-sky/showcase/hero.mp4
+heroPoster: /media/three-pixels-in-the-sky/showcase/hero.webp
+heroAlt: "An unmodified recording of the sky above trees: a high aircraft and birds a few pixels wide, each followed by a green box that draws its path behind it"
+cardSummary: "A drone of three pixels on a real sky: what two cameras on a Jetson and two phones detect and from how far, and what radar, radio and heat add from the physics."
+---
+import Figure from '../../components/Figure.astro';
+import LoopVideo from '../../components/LoopVideo.astro';
+
+<Figure src="/media/three-pixels-in-the-sky/one_flight.png" width={100} alt="Horizontal bars on a logarithmic distance axis from 3 km down to 20 m, with a second axis for the seconds until arrival. Radio receiver from 3000 m, radar from 2500 m, thermal camera from 1800 m, daylight camera in 4K from 295 m and at 1080p from 186 m, microphone from 88 m, classifier from 48 m. Dashed lines mark where the drone is declared: 2.7 km if it transmits, 1.9 km if it is silent, 148 m with camera and microphone alone.">
+
+One 0.30 m drone flying in from 3 km at 12 m/s: from where each sensor reports, and where the drone is declared. Blue bars are calculated or assumed, yellow bars come from the recordings. The long-range sensors give about three minutes of warning and the hardware built here 12 to 25 seconds ([5.7](/projects/three-pixels-in-the-sky/05-from-an-alert-to-a-position/#57-one-flight-start-to-finish)).
+
+</Figure>
+
+## Why a small drone
+
+A drone that costs a few hundred euros can close an airport or damage infrastructure worth
+millions, so it has to be detected and located before it does any harm. At the distance
+where that still leaves time, it covers a few pixels of a camera image, and no single
+sensor finds it reliably: a camera fails in fog and at night, a microphone in wind, a radar
+behind terrain, and a radio receiver when the drone does not transmit. This project works
+out how the sensors can work together, tests the two that could be built, and calculates
+from the physics what the others would add.
+
+## Selected results
+
+Every result is labelled as measured on the two cameras and the phones, modelled on those
+recordings, or calculated from the physics. No real drone was flown in front of the
+cameras: where a drone appears in a camera test, it is drawn into a real sky recording by a
+model.
+
+The video at the top of this page is such a recording with nothing added. In ten minutes
+of cloudless sky the detector gives no noise track of two seconds or more, and what it
+does follow for seconds is real: a high aircraft and birds a few pixels wide
+([2.4](/projects/three-pixels-in-the-sky/02-seeing-a-small-drone/#24-what-the-empty-sky-gives)).
+
+<div class="results">
+
+<LoopVideo src="/media/three-pixels-in-the-sky/pipeline.mp4" poster="/media/three-pixels-in-the-sky/pipeline.webp" alt="A camera frame of a sky above trees with small boxes on drones a few pixels wide, a plot of the detector's score rising above its threshold as one drone comes closer, and below them the same small patch of the image after each of the five steps of the detector">
+
+Real sky, drawn-in drone: a 0.30 m drone is held from 127 to 274 m, depending on its contrast, when it is 1.6 to 3.4 pixels wide. It cannot be seen in the frame and only stands out once the change against the background is divided by the local noise ([2.7](/projects/three-pixels-in-the-sky/02-seeing-a-small-drone/#27-a-drone-flying-in)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/three-pixels-in-the-sky/tracker_blackout.mp4" poster="/media/three-pixels-in-the-sky/tracker_blackout.webp" alt="Two panels. Left: a magnified patch of sky with a high aircraft whose detections are hidden for several seconds, a yellow circle for the region the filter predicts and a red dot inside it where the detector saw the aircraft. Right: a bird crossing above trees with its predicted region">
+
+On real tracks: with the detections hidden, the prediction of the Kalman filter stays narrow enough to point a zoom camera for more than 10 seconds on an aircraft and for 1 second on a bird, which turns ([5.6](/projects/three-pixels-in-the-sky/05-from-an-alert-to-a-position/#56-a-track-with-an-uncertainty)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/three-pixels-in-the-sky/evidence.mp4" poster="/media/three-pixels-in-the-sky/evidence.webp" alt="One simulated flight through haze. Top: a mark for every second in which the camera or the microphone reports. Bottom: the sum of the evidence against distance, rising in steps and crossing its threshold at 100 m, where the drone is declared">
+
+A model on the measurements: with every report weighted by how reliable its sensor is at that moment, camera and microphone together are as good as the better of the two in every kind of weather, and neither night nor wind leaves the pair blind ([5.4](/projects/three-pixels-in-the-sky/05-from-an-alert-to-a-position/#54-what-the-model-shows)).
+
+</LoopVideo>
+
+<LoopVideo src="/media/three-pixels-in-the-sky/micro_doppler_rotor.mp4" poster="/media/three-pixels-in-the-sky/micro_doppler_rotor.webp" alt="Left: a two-bladed rotor seen from above with a radar wave arriving. Right: the Doppler shift of its echo against time, with a bright vertical stripe every 5 milliseconds, each time a blade is broadside to the radar">
+
+Calculated: at 9.4 GHz every rotor blade returns a flash twice per turn, a pattern that a bird does not have and that a radar could resolve to about 1.8 km ([4.3](/projects/three-pixels-in-the-sky/04-radar-radio-and-heat/#43-radar-telling-a-drone-from-a-bird)).
+
+</LoopVideo>
+
+</div>
+
+## From a first alert to a position
+
+Detecting a drone is a chain of four questions, and each of them is answered by different
+sensors at a different distance.
+
+<Figure src="/media/three-pixels-in-the-sky/chain.png" width={100} alt="Four boxes from left to right connected by arrows. Is something there: radio receiver 1 to 2 km, radar several km, daylight camera 127 to 274 m, microphone 26 to 88 m. Roughly where: radio bearing 5 degrees, radar range and 1 to 2 degrees, camera bearing 0.035 degrees without range. What is it: radar blade flashes to about 1.8 km, rotor tones at 533 Hz, how it moves, classifier needs 9 pixels at 48 m. Exactly where: tracker 0.02 degrees with a cue valid for 4 seconds, two cameras 20 m apart, friendly drone. Colours mark whether a number is measured, modelled on the recordings, calculated, or described.">
+
+The four questions, the sensors that answer each one and the number found for it, coloured by where the number comes from. The sensors that were built answer the questions at short range; the first alert at kilometres has to come from a radar or a radio receiver.
+
+</Figure>
+
+1. **Is something there?** Sensors that watch everything at once raise an alert: a radio
+   receiver, a radar, wide cameras, microphones. A weak signal is enough, as long as false
+   alerts stay rare.
+2. **Roughly where?** The alert comes with a direction, and from a radar with a distance.
+   That gives a sector or a box that can be hundreds of metres across.
+3. **What is it?** A sensor with a narrow view is pointed at the box and has enough pixels
+   to tell a drone from a bird. The rotors help: they leave flashes in a radar echo and
+   tones in a microphone.
+4. **Exactly where?** All reports go into one tracker that keeps a position, a velocity
+   and an uncertainty. A precise position needs a radar range, two sites that see the
+   target from different sides, or a sensor that flies closer.
+
+The questions feed each other. A zoom camera that can see a small drone at 2 km only sees
+a window of about 8 degrees, so the rough position of the second question is what makes
+the third one possible, and what the camera then sees improves the position of the fourth.
+
+### What the numbers are
+
+Only part of the chain could be built, so the chapters keep three kinds of numbers apart.
+
+| Part | Number | Where it comes from |
+|---|---|---|
+| False alarms, the aircraft and bird tracks | no noise track of 2 s or more in 10 minutes | measured, two cameras on a Jetson Orin Nano |
+| Detection against size and range | 127 to 274 m at 1080p, 295 m in 4K | real sky; the drones are drawn into the recordings by a model |
+| Classifier | needs about 9 pixels, which the camera has at 48 m | trained on a public dataset and on drawn-in drones; it has not seen a real drone on this camera |
+| Tracker | 0.02 degrees; a cue stays valid for about 4 s | five real tracks and one drawn-in drone |
+| Rotor tones of the Crazyflie | 533 Hz, with multiples up to 6 kHz | measured with two phones |
+| Hearing range | 26 to 88 m | modelled; the phones could not measure loudness |
+| Radar, radio receiver, thermal camera | kilometres; 1 to 2 km for a video link; 0.4 km in fog to a few kilometres | calculated from the physics or simulated; no hardware |
+| Combining the sensors, the flight from 3 km | declared at 148 m by camera and microphone alone | a model on the measurements; the two long-range sensors are assumed curves |
+| Pointed cameras, the friendly drone | range to 1 m at 150 m with two cameras 20 m apart | calculated and described; not built |
+
+### Why this order
+
+1. **How to detect and locate a drone**: what a drone gives away, how far each sensor
+   reaches, and the four questions.
+2. **Seeing a small drone**: the camera, the sensor that could be built and tested best. A
+   detector for targets of a few pixels, its false alarms on a real sky, and its range.
+3. **Hearing a small drone**: the second sensor that could be built. The rotor tones of a
+   Crazyflie on two phones, and a model of how far they carry.
+4. **Radar, radio and heat**: the sensors that were not available, from their physics, so
+   that the chain is complete from kilometres down to metres.
+5. **From an alert to a position**: all sensors together. How weak reports add up when
+   every sensor fails in some weather, and a tracker whose uncertainty is tested on real
+   tracks.
+6. **Closing in**: what the ground track has to hand over to a sensor that goes closer,
+   and what comes next.
+
+## What was built
+
+Two Arducam IMX519 cameras on a Jetson Orin Nano record the sky, and two phones record a
+Crazyflie 2.1 Brushless as microphones. The detector, a small classifier and a Kalman
+filter run on the recordings afterwards, at about 7 frames per second on one desktop core;
+it is not a live detector yet.
+
+<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0 1.5rem', alignItems: 'start' }}>
+
+<Figure src="/media/three-pixels-in-the-sky/jetson_cameras.jpg" width={100} alt="A black metal case with a fan grille, holding a Jetson Orin Nano. Two small green camera boards are mounted on brackets on one side of the case, a few centimetres apart, each connected by a flat ribbon cable.">
+
+The Jetson Orin Nano with the two cameras, a hand's width apart: enough to record with both, too little to measure range from the pair.
+
+</Figure>
+
+<Figure src="/media/three-pixels-in-the-sky/crazyflie.jpg" width={100} alt="A small quadcopter seen from above on a white table: a black cross-shaped circuit board with a motor at each end, four green two-bladed propellers with black guards around them, and a battery under a small board in the centre.">
+
+The Crazyflie that was recorded. Two blades per rotor turn 267 turns per second into a tone near 533 Hz.
+
+</Figure>
+
+</div>
+
+## What is open
+
+The largest doubt is the target. Every range of the camera depends on drones that were
+drawn into the recordings, and the classifier has never seen a real drone on this camera,
+so the first step is a flight with a real drone at measured distances. The second is a
+calibrated microphone outdoors, so that the hearing range no longer rests on an assumed
+margin. The sky in the recordings is one cloudless afternoon; clouds, dusk and rain will
+reduce the range.
+
+The last link of the chain is described and calculated, not built: a friendly drone that
+flies to the rough position, confirms what the object is and measures where it is from
+close by. The project ends there, at knowing what the object is and where it is.
+Interception is the step that follows, and it is deliberately left out.
+
+## How it was made
+
+Everything is Python. The sensor models and the tracker live in one reusable package, the
+recordings are frozen and never edited by hand, and the figures are regenerated from the
+same code. The framing is defensive throughout: sensing and estimation, with nothing that
+captures, damages or interferes with an aircraft.
+
+The full report can be downloaded as a PDF at the top of this page.
+
+Code available on request.

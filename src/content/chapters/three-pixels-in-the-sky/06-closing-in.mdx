@@ -1,0 +1,195 @@
+---
+project: three-pixels-in-the-sky
+number: 6
+title: "Closing in"
+summary: "Getting closer to answer what it is and exactly where: two cameras that can be pointed, a friendly drone that flies to the rough position and looks, and what comes next."
+---
+import Figure from '../../../components/Figure.astro';
+
+Chapter 5 ends with a drone that has been declared and a rough position: a box of hundreds
+of metres from a long-range sensor, or a precise bearing without range from a camera. Two
+questions remain, what the object is and exactly where it is. The best way to answer both
+is to bring a sensor closer.
+
+Nothing was built for this chapter. It is calculated from the numbers of the earlier
+chapters and described from the literature, and it is the direction in which this work
+would continue.
+
+## 6.1 What getting closer gives
+
+All the limits found in this report are limits of distance.
+
+| Limit | At | Chapter |
+|---|---|---|
+| The camera first holds a 0.30 m drone at contrast 0.4 | 186 m | 2 |
+| The classifier separates a drone from a bird in one frame | from 9 pixels, which is 48 m at 1920 x 1080 | 2 |
+| The microphone hears a Crazyflie with a 40 dB margin | 88 m | 3 |
+| Two cameras 0.2 m apart measure range to within 1 m | 15 m | 5 |
+
+A sensor on a tower has to wait until the drone comes within these distances. A sensor on
+a friendly drone can fly there. At 50 m from the target, the same small camera that has
+trouble at 190 m has 9 pixels on the target, which is enough for the classifier of chapter
+2. Within 15 m, a pair of cameras a hand's width apart, which is useless on the tower,
+measures the range to within a metre.
+
+## 6.2 Two cameras that can be pointed
+
+One step closer can be taken without leaving the ground. Two cameras with long lenses,
+each on a pan-tilt mount and some distance apart, work like a pair of eyes. Once both
+look at the same object, the directions of the two give its distance by triangulation,
+and each camera has enough pixels on it to say what it is.
+
+Section 5.2 gave the lens: to put four pixels on a 0.30 m drone at 2 km, the camera sees
+a window of 8 degrees, and one pixel is then 0.002 degrees. With the formula of section
+5.5, the range error of a pair with baseline $B$ is
+
+$$
+\sigma_r = \frac{\sqrt{2} r^2 \sigma_\theta}{B}
+$$
+
+| Drone at | Baseline | Range error, one pixel in each camera |
+|---|---|---|
+| 1 km | 20 m | 2.6 m |
+| 2 km | 20 m | 10 m |
+| 2 km | 100 m | 2.1 m |
+
+This is the first sensor in this report that gives a range without transmitting anything.
+Three conditions come with it.
+
+- **The pair has to be told where to look.** Scanning the sky through a window of 8
+  degrees takes too long (section 5.2). A radio bearing, a radar detection or a wide
+  camera gives the direction, and both cameras turn to it. They can point almost
+  parallel: for a baseline of 20 m and any range beyond 300 m, the directions of the two
+  cameras differ by less than 4 degrees, which is inside one window.
+- **The pointing has to be known to a pixel.** If the angle of a mount is only known to
+  0.01 degrees, the range error at 2 km grows from 10 m to 50 m. The angles therefore
+  have to be calibrated on distant landmarks, and checked while the system runs.
+- **Both cameras have to expose at the same moment.** A drone that crosses at 15 m/s at
+  2 km moves two pixels in 10 milliseconds, so the two exposures have to agree to about
+  a millisecond.
+
+Such a pair answers both remaining questions for a target that is in sight and in
+daylight. It does not help against a drone behind terrain or in fog.
+
+## 6.3 A sensor that flies to the target
+
+The other way to get closer is to send a sensor. The idea is a small friendly drone that
+stands ready in a box at the site, always charged. When the ground sensors declare a
+possible drone, it takes off without waiting for the alert to be certain, flies to the
+rough position, and looks. It is a mobile mount for a camera, and its first task is to
+reduce the uncertainty: is this a drone, which kind, and exactly where is it.
+
+**How soon it is there.** For the flight of section 5.7, an intruder at 12 m/s, and a
+friendly drone that needs 20 seconds to leave its box and then flies at 20 m/s:
+
+| Declared at | By | The two meet after | At a distance from the site of |
+|---|---|---|---|
+| 2.7 km | the radio receiver | 97 s | 1.5 km |
+| 1.9 km | the radar | 72 s | 1.0 km |
+
+The launch delay and the speed are assumptions. In both cases the drone meets the
+intruder at least a kilometre out, where the camera on the ground would still see a
+single pixel.
+
+**What it has to search.** How large an area the drone has to search on arrival depends
+on who gave the alert. A radar gives a box of tens of metres, which fits in one image
+from 100 m away. A radio bearing gives a strip 230 m wide and no range, so the drone has
+to fly along the bearing and search as it goes. This is why the uncertainty of the
+ground track matters as much as its position.
+
+**What it gains by being close.** Everything the camera delivers improves in proportion
+to the distance.
+
+| Distance to the target | Pixels on a 0.30 m drone | What that allows (section 2.13) |
+|---|---|---|
+| 190 m | 2 | detection |
+| 48 m | 9 | drone or bird |
+| 20 m | 22 | which type of drone, and what it carries |
+
+At 50 m, one pixel of the drone's camera is 3 cm on the target. Its bearing crosses the
+bearing from the ground at a wide angle, and together they give the position to well
+under a metre, in all three directions. From that point on, the accuracy is no longer
+set by the cameras but by how well the friendly drone knows its own position.
+
+**What it sends back.** The drone reports a track with its uncertainty and the images
+themselves, so that a person can see what the object is before anything is decided. The
+drone can then keep the target in view from a distance that holds enough pixels on it,
+about 20 m for the last row of the table.
+
+**What the ground has to hand over.** The ground track has to provide three things:
+a position, a velocity and an uncertainty. The uncertainty is essential, because it tells
+the friendly drone how large an area its own camera has to cover when it arrives.
+
+Two things make the handover harder than it sounds. First, the position of the friendly drone
+itself has to be known as accurately as the target position is wanted, and its own rotors
+disturb its microphone and shake its camera. Second, the target moves. A quadcopter can
+change its velocity within a second, so a track that is handed over is a prediction that
+gets older. The uncertainty has to grow with the age of the last measurement. If it does
+not, the friendly drone searches in the wrong place and is confident about it. Section
+5.6 measured how fast this happens: a cue for an 8 degree window stays
+useful for about 4 seconds for a drone and for 1 second for a bird.
+
+Each of these parts has been shown to work. A group at NTNU flew a thermal camera on an
+unmanned aircraft, placed each detection on the map with the navigation data of the
+aircraft, and followed boats with a Kalman filter and a constant-velocity model, the
+same model as in section 5.6. With at least 100 measurements they report a position
+accuracy of 5 to 15 m from an altitude of 400 m [[36]](/projects/three-pixels-in-the-sky/references/), and they extended it to a camera
+that can be pointed [[37]](/projects/three-pixels-in-the-sky/references/). The error of such a position is the error of the pointing
+angle times the distance, plus the error of the aircraft's own navigation, which the
+same group has studied in its own right [[38]](/projects/three-pixels-in-the-sky/references/). For a target in the air, the distance is
+no longer given by the sea surface, which is what makes this problem harder.
+
+A drone with only a camera measures directions and no distances. From one moving camera
+the range does become observable over time, but only if the camera's own path bends
+[[49]](/projects/three-pixels-in-the-sky/references/).
+
+Being this close is also the starting point for stopping the intruder. That step is not
+part of this report, which ends at knowing what the object is and where it is. The
+literature on it starts from classical guidance [[47]](/projects/three-pixels-in-the-sky/references/) and continues in
+recent work on small drones [[27]](/projects/three-pixels-in-the-sky/references/).
+
+## 6.4 Where to look next
+
+With one tower and no moving parts there is nothing to decide, because every sensor looks
+where it looks. As soon as there is a camera that can be pointed or a drone that can be
+sent, there is a decision to make many times per second: which box gets the narrow sensor
+now? The track with the largest uncertainty? The track that is most likely a drone? The
+one closest to the site that is protected? Every choice occupies the sensor for a moment,
+and during that moment the other tracks are not observed and their uncertainty grows.
+
+In the literature this is called sensor management [[26]](/projects/three-pixels-in-the-sky/references/). The next look is chosen so that the
+expected uncertainty over all tracks, weighted by importance, decreases the most. This is
+the same calculation as in section 5.3, with a different question: section 5.3 asks how
+much a report is worth, and sensor management asks how much a report from a certain place
+would be worth. The model of chapter 5 already has two of the ingredients, a sum of
+evidence per track and a weight per sensor that follows the conditions. What it does not
+have yet is the geometry and the timing.
+
+This is also where learning methods are most useful. In the detector, chapter 2
+showed that classical signal processing did most of the work. The choices are a better
+fit: which look, which route for the friendly drone, and when to stop looking and report.
+
+## 6.5 What comes next
+
+These are the next steps, ordered by how much doubt each one removes:
+
+1. **A real drone in front of the cameras at measured distances.** Every range in chapter 2
+   depends on pasted targets, and the classifier has never seen a real drone on this
+   camera.
+2. **A calibrated microphone outdoors**, so that the range in chapter 3 no longer depends
+   on an assumed margin, and two microphones on one clock for a bearing.
+3. **The detector before the encoder, running live on the Jetson.** Chapter 2 estimates
+   the gain at a quarter of the range.
+4. **More kinds of sky**: clouds, dusk, rain. False alerts come from there, and that is
+   where the weights of chapter 5 would prove their value.
+5. **A second camera site** twenty metres away, to measure range by triangulation.
+6. **Conditions that are estimated, not given**: the fusion of chapter 5 should determine
+   the weather itself from the recent behaviour of the sensors.
+7. **The friendly drone**: first as a moving camera that confirms a ground alert, later as
+   part of the track.
+8. **Darkness and cold**: a thermal camera next to the daylight camera, and a test in
+   winter conditions (section 1.7).
+9. **A filter that models the slow error of the detector**, so that its uncertainty is
+   right on every time scale (section 5.6).
+
+**Back to the [project page](/projects/three-pixels-in-the-sky/).**

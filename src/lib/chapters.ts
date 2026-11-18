@@ -9,3 +9,6 @@ export async function publishedChapters(project?: string): Promise<CollectionEnt
   const teasers = new Set((await getCollection('projects', (p) => p.data.status === 'soon')).map((p) => p.id));
   return getCollection('chapters', (c) => !teasers.has(c.data.project) && (!project || c.data.project === project));
 }
+
+/** The reference list of a project is a page among its chapters, but not a numbered chapter. */
+export const isReferences = (id: string): boolean => id.split('/').pop() === 'references';
